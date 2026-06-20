@@ -110,3 +110,7 @@ cd services/signal && npx tsc --noEmit
 - 桌面端 Tauri 的 devUrl 指向 Vite 开发服务器 (localhost:1420)
 - bcrypt cost=12 必须严格执行（product spec）
 - TSConfig rootDir 设置为 monorepo 根以保证 shared/ 能被引用
+- 文件传输引擎使用 DataChannel 统一消息路由：字符串=控制消息，ArrayBuffer=分块数据
+- CRC32 使用 IEEE 802.3 标准表驱动实现（验证通过：CRC32("123456789")=0xCBF43926）
+- 流控使用 bufferedAmount 阈值 + ACK 窗口双机制防止接收端溢出
+- SHA256 使用 Web Crypto API（crypto.subtle.digest），无需额外依赖
