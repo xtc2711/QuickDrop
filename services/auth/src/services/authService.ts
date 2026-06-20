@@ -4,7 +4,7 @@
 
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
-import type { RegisterInput, LoginInput } from "../models/schemas.js";
+import type { RegisterInput, LoginInput, ChangePasswordInput } from "../models/schemas.js";
 import type { AuthResponse, PublicUser, DeviceInfo, TokenPair } from "../../../../shared/types/index.js";
 import { AppError } from "../utils/AppError.js";
 import {
@@ -12,7 +12,9 @@ import {
   verifyRefreshToken,
   createJti,
   getTokenExpiry,
+  hashToken,
 } from "../utils/jwt.js";
+import { addToBlacklist } from "./blacklistService.js";
 
 const prisma = new PrismaClient();
 const BCRYPT_COST = 12;
@@ -69,7 +71,7 @@ export class AuthService {
       data: {
         userId: user.id,
         deviceId: device.id,
-        tokenHash: await bcrypt.hash(tokens.refresh_token, 6),
+        tokenHash: hashToken(tokens.refresh_token),
         expiresAt: getTokenExpiry(tokens.refresh_token),
       },
     });
@@ -169,7 +171,7 @@ export class AuthService {
       data: {
         userId: user.id,
         deviceId: device.id,
-        tokenHash: await bcrypt.hash(tokens.refresh_token, 6),
+        tokenHash: hashToken(tokens.refresh_token),
         expiresAt: getTokenExpiry(tokens.refresh_token),
       },
     });
@@ -196,10 +198,11 @@ export class AuthService {
       throw new AppError(401, "请使用 Refresh Token 刷新");
     }
 
-    // 查找数据库中的 Token 记录
-    const tokenHash = await bcrypt.hash(token, 6);
+    // 查找数据库中的 Token 记录（使用 SHA-256 确定性哈希进行匹配）
+    const tokenHash = hashToken(token);
     const storedToken = await prisma.refreshToken.findFirst({
       where: {
+        tokenHash,
         userId: payload.sub,
         deviceId: payload.device_id,
         revoked: false,
@@ -208,7 +211,7 @@ export class AuthService {
     });
 
     if (!storedToken) {
-      throw new AppError(401, "Token 已被撤销，请重新登录");
+      throw new AppError(401, "Token 无效或已被撤销，请重新登录");
     }
 
     // 撤销旧 Token
@@ -230,7 +233,7 @@ export class AuthService {
       data: {
         userId: payload.sub,
         deviceId: payload.device_id,
-        tokenHash: await bcrypt.hash(tokens.refresh_token, 6),
+        tokenHash: hashToken(tokens.refresh_token),
         expiresAt: getTokenExpiry(tokens.refresh_token),
       },
     });
@@ -248,8 +251,16 @@ export class AuthService {
   /**
    * 退出登录
    * @param allDevices 是否退出所有设备
+   * @param currentJti 当前 Access Token 的 jti，用于加入黑名单
+   * @param jtiExp Access Token 过期时间戳（秒）
    */
-  async logout(userId: string, deviceId: string, allDevices: boolean): Promise<void> {
+  async logout(
+    userId: string,
+    deviceId: string,
+    allDevices: boolean,
+    currentJti?: string,
+    jtiExp?: number,
+  ): Promise<void> {
     if (allDevices) {
       // 撤销该用户所有未撤销的 Refresh Token
       await prisma.refreshToken.updateMany({
@@ -275,6 +286,12 @@ export class AuthService {
         data: { isOnline: false },
       });
     }
+
+    // 将当前 Access Token 加入黑名单，实现即时失效
+    if (currentJti) {
+      const expiresAt = jtiExp ?? Math.floor(Date.now() / 1000) + 900; // 默认 15 分钟
+      await addToBlacklist(currentJti, expiresAt);
+    }
   }
 
   /**
@@ -288,6 +305,73 @@ export class AuthService {
       email: user.email,
       created_at: user.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * 修改密码
+   * 1. 验证旧密码是否正确
+   * 2. bcrypt 加密新密码并更新
+   * 3. 可选：撤销所有其他设备的 Refresh Token（强制重新登录）
+   * 4. 可选：将当前 Access Token 加入黑名单
+   *
+   * @param userId 用户 ID
+   * @param deviceId 当前设备 ID（用于保留当前设备不被撤销）
+   * @param input 旧密码 + 新密码 + 是否撤销其他设备
+   * @param currentJti 当前 Access Token 的 jti（如果 revokeAllDevices，可选加入黑名单）
+   * @param jtiExp Access Token 过期时间戳
+   */
+  async changePassword(
+    userId: string,
+    deviceId: string,
+    input: ChangePasswordInput,
+    currentJti?: string,
+    jtiExp?: number,
+  ): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppError(404, "用户不存在");
+
+    // 验证旧密码
+    const valid = await bcrypt.compare(input.old_password, user.passwordHash);
+    if (!valid) {
+      throw new AppError(401, "当前密码错误");
+    }
+
+    // 加密新密码并更新
+    const newHash = await bcrypt.hash(input.new_password, BCRYPT_COST);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newHash },
+    });
+
+    // 撤销其他设备（默认行为）
+    if (input.revoke_all_devices !== false) {
+      // 撤销除当前设备外的所有 Refresh Token
+      await prisma.refreshToken.updateMany({
+        where: {
+          userId,
+          deviceId: { not: deviceId },
+          revoked: false,
+        },
+        data: { revoked: true },
+      });
+
+      // 标记其他设备离线
+      await prisma.device.updateMany({
+        where: {
+          userId,
+          id: { not: deviceId },
+        },
+        data: { isOnline: false },
+      });
+    }
+
+    // 可选：黑名单当前 Token（如果调用方提供）
+    if (currentJti) {
+      const expiresAt = jtiExp ?? Math.floor(Date.now() / 1000) + 900;
+      await addToBlacklist(currentJti, expiresAt);
+    }
+
+    return { message: "密码修改成功" };
   }
 
   /**

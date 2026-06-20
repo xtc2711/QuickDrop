@@ -32,6 +32,12 @@ export interface LoginRequest {
   remember_device?: boolean;
 }
 
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+  revoke_all_devices?: boolean; // 默认 true，修改密码后强制其他设备重新登录
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

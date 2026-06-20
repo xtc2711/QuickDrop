@@ -44,5 +44,27 @@ export const logoutSchema = z.object({
   all_devices: z.boolean().optional().default(false),
 });
 
+export const changePasswordSchema = z
+  .object({
+    old_password: z.string().min(1, "当前密码不能为空"),
+    new_password: z
+      .string()
+      .min(8, "新密码至少 8 位")
+      .max(128, "新密码不能超过 128 位"),
+    revoke_all_devices: z.boolean().optional().default(true),
+  })
+  .refine(
+    (data) => {
+      const result = validatePasswordStrength(data.new_password);
+      return result.valid;
+    },
+    { message: "新密码必须包含大写字母、小写字母和数字", path: ["new_password"] },
+  )
+  .refine(
+    (data) => data.old_password !== data.new_password,
+    { message: "新密码不能与当前密码相同", path: ["new_password"] },
+  );
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

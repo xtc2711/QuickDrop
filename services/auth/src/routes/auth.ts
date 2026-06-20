@@ -4,7 +4,7 @@
 
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
-import { registerSchema, loginSchema, refreshSchema, logoutSchema } from "../models/schemas.js";
+import { registerSchema, loginSchema, refreshSchema, logoutSchema, changePasswordSchema } from "../models/schemas.js";
 import { AuthService } from "../services/authService.js";
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -20,7 +20,7 @@ const authService = new AuthService();
  */
 authRouter.post(
   "/register",
-  rateLimitMiddleware({ windowMs: 60_000, max: 5 }),
+  rateLimitMiddleware({ windowMs: 3600_000, max: 5 }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = registerSchema.safeParse(req.body);
@@ -95,8 +95,44 @@ authRouter.post(
 
       const userId = req.user!.sub;
       const deviceId = req.user!.device_id;
-      await authService.logout(userId, deviceId, parsed.data.all_devices);
+      const jti = req.user!.jti;
+      const exp = req.user!.exp;
+      await authService.logout(userId, deviceId, parsed.data.all_devices, jti, exp);
       res.json({ message: "已退出登录" });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/v1/auth/change-password
+ * 修改密码（需要登录）
+ * 默认撤销其他设备登录，强制重新认证
+ */
+authRouter.post(
+  "/change-password",
+  authenticateToken,
+  rateLimitMiddleware({ windowMs: 60_000, max: 3 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = changePasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new AppError(400, "请求参数校验失败", parsed.error.flatten());
+      }
+
+      const userId = req.user!.sub;
+      const deviceId = req.user!.device_id;
+      const jti = req.user!.jti;
+      const exp = req.user!.exp;
+      const result = await authService.changePassword(
+        userId,
+        deviceId,
+        parsed.data,
+        jti,
+        exp,
+      );
+      res.json(result);
     } catch (err) {
       next(err);
     }

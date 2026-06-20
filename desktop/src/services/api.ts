@@ -6,9 +6,10 @@
 import { useAuthStore } from "../stores/authStore";
 import type {
   AuthResponse,
+  ChangePasswordRequest,
   LoginRequest,
   RegisterRequest,
-} from "../../../../shared/types/index";
+} from "../../../shared/types/index";
 
 const AUTH_BASE = "http://localhost:3001/api/v1";
 
@@ -93,6 +94,18 @@ export async function logout(allDevices = false): Promise<void> {
 }
 
 /**
+ * 修改密码
+ */
+export async function changePassword(
+  data: ChangePasswordRequest,
+): Promise<{ message: string }> {
+  return request("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
  * 获取设备列表
  */
 export async function fetchDevices(): Promise<{
@@ -100,4 +113,11 @@ export async function fetchDevices(): Promise<{
   paired_devices: unknown[];
 }> {
   return request("/devices");
+}
+
+/**
+ * 远程移除设备
+ */
+export async function removeDevice(deviceId: string): Promise<{ message: string }> {
+  return request(`/devices/${deviceId}`, { method: "DELETE" });
 }
