@@ -1,27 +1,102 @@
-# Ralph Fix Plan
+# Ralph Fix Plan — QuickDrop
 
-## High Priority
-- [ ] Set up basic project structure and build system
-- [ ] Define core data structures and types
-- [ ] Implement basic input/output handling
-- [ ] Create test framework and initial tests
+## Phase 1: 核心功能 MVP（高优先级）
 
-## Medium Priority
-- [ ] Add error handling and validation
-- [ ] Implement core business logic
-- [ ] Add configuration management
-- [ ] Create user documentation
+### 第 1 周: 认证服务
+- [x] 初始化项目结构（认证服务 + 信令服务 + 桌面客户端）
+- [ ] 设计并创建 PostgreSQL 数据库表（users, devices, refresh_tokens, token_blacklist）
+- [ ] 实现用户注册 API（邮箱格式校验、密码强度校验、bcrypt 加密、JWT 签发）
+- [ ] 实现用户登录 API（凭证验证、设备会话记录、登录失败锁定机制）
+- [ ] 实现 Token 刷新 API（Refresh Token 轮换）
+- [ ] 实现退出登录 API（单设备退出 / 全设备退出，Token 黑名单）
+- [ ] 实现速率限制中间件（登录接口单 IP 每分钟 10 次）
+- [ ] 编写认证服务单元测试和集成测试
 
-## Low Priority
-- [ ] Performance optimization
-- [ ] Extended feature set
-- [ ] Integration with external services
-- [ ] Advanced error recovery
+### 第 2 周: 信令服务
+- [ ] 搭建 WebSocket 服务基础框架（JWT 认证握手）
+- [ ] 实现设备在线管理（上线注册、心跳检测 30 秒超时、离线标记）
+- [ ] 实现同账户设备自动配对逻辑（same_account_device_online/offline 推送）
+- [ ] 实现扫码配对（生成二维码含连接信息 + 一次性配对令牌，2 分钟过期）
+- [ ] 实现配对码连接（生成 6 位数字码，房间管理，2 分钟过期，限速 5 次/60秒/IP）
+- [ ] 实现 WebRTC 信令透传（offer/answer/ICE candidate 转发）
+- [ ] 编写信令服务单元测试和集成测试
+
+### 第 3 周: 桌面端基础功能
+- [ ] 搭建 Tauri 项目骨架（Rust 后端 + Web 前端）
+- [ ] 实现登录/注册页面 UI（邮箱+密码表单，错误提示，加载状态）
+- [ ] 实现认证状态管理（Token 存储、自动刷新、记住设备）
+- [ ] 实现 WebSocket 连接管理（自动重连、心跳维持）
+- [ ] 实现设备列表页面（同账户设备 + 临时配对设备分区，在线状态实时更新）
+- [ ] 实现基础自动配对流程（登录后自动连接同账户设备）
+
+### 第 4 周: 文件传输核心
+- [ ] 实现 WebRTC DataChannel 建立与管理（ICE 候选收集、连接建立、通道就绪检测）
+- [ ] 实现文件分块传输引擎（16KB 分块、CRC32 校验、有序可靠模式）
+- [ ] 实现文件拖拽区域 UI（拖拽高亮、多文件支持、目标设备选择）
+- [ ] 实现文件选择传输（系统文件选择器调用、多选支持）
+- [ ] 实现传输进度组件（百分比、实时速度 MB/s、剩余时间、进度条动画）
+- [ ] 实现 SHA256 完整性校验（发送端计算 → 传输 → 接收端比对 → 不一致自动重传最多 3 次）
+- [ ] 实现并行传输队列（最多 5 个并发，FIFO 等待队列）
+- [ ] 编写传输模块端到端测试
+- [ ] 端到端联调（注册 → 登录 → 自动配对 → 拖拽传输 → 完整性校验）
+
+## Phase 2: 完善与移动端（中优先级）
+
+### 第 5 周: 移动端基础
+- [ ] 搭建 Android 项目（Kotlin + WebView WebRTC）
+- [ ] 搭建 iOS 项目（Swift + WebView WebRTC）
+- [ ] 实现移动端登录/注册页面
+- [ ] 实现移动端扫码功能（调用原生摄像头，解析二维码自动连接）
+- [ ] 实现移动端配对码输入（6 位数字输入框，自动跳格，支持粘贴）
+- [ ] 实现移动端设备列表
+- [ ] 实现移动端文件选择传输
+
+### 第 6 周: 设备管理与连接优化
+- [ ] 实现设备管理页面（查看所有已登录设备，首次登录时间，最后活跃时间）
+- [ ] 实现远程移除设备功能（Token 黑名单 + force_logout 推送）
+- [ ] 优化配对码生成（排除 123456、000000 等易混淆组合）
+- [ ] 实现连接通道指示 UI（蓝牙/局域网/中继标签，当前通道高亮）
+- [ ] 实现传输历史列表（最近 50 条记录，可手动清除）
+- [ ] 实现退出登录二次确认弹窗（选择退出范围）
+
+### 第 7 周: 性能优化与安全加固
+- [ ] WebRTC 批量连接控制优化
+- [ ] 大文件传输内存管理（16KB 分块，监控内存使用）
+- [ ] 传输完成动效（粒子爆发等）
+- [ ] 安全审计（Token 传输 HTTPS 强制、密码强度、速率限制验证）
+- [ ] WebRTC DataChannel 各平台兼容性验证
+- [ ] NAT 穿透成功率测试与 ICE 策略调优
+
+## Phase 3: 增强功能（低优先级）
+
+### 第 8-9 周: 原生打包与基础设施
+- [ ] Tauri 桌面端原生打包（Windows .msi / macOS .dmg）
+- [ ] 移动端原生打包（Android APK / iOS IPA）
+- [ ] STUN/TURN 服务器部署（coturn 配置与调优）
+- [ ] 信令服务器生产环境部署
+- [ ] CI/CD 流水线搭建
+
+### 第 10 周: 运维能力
+- [ ] 密码修改功能
+- [ ] 密码找回功能（邮箱重置）
+- [ ] 速率限制全局配置
+- [ ] 管理后台（用户管理、设备管理、连接监控）
+
+### 第 11 周: 扩展功能
+- [ ] 第三方登录（微信 / Apple / Google OAuth）
+- [ ] 跨账户文件分享（非登录用户间临时传输）
+- [ ] 断线自动重传（传输中断后自动恢复，Phase 2 已规划基础功能）
+- [ ] 文件传输通知（系统通知栏集成）
 
 ## Completed
-- [x] Project initialization
+- [x] PRD 文档完成
+- [x] Ralph 项目初始化
 
 ## Notes
-- Focus on MVP functionality first
-- Ensure each feature is properly tested
-- Update this file after each major milestone
+- 核心差异化: 同账户自动配对（无需手动操作）+ 三层通道自动降级 + 严格无损承诺
+- 文件数据永不经过服务器，仅 WebRTC DataChannel P2P 直传
+- 密码使用 bcrypt(cost=12) 加密，Token 仅 HTTPS 传输
+- 技术栈: Tauri (桌面) + Kotlin/Swift (移动) + Rust/Node.js (后端) + PostgreSQL + Redis
+- 关联技术文档: AUTH_DESIGN.md（认证详细设计）、README.md（技术总览）
+- 验收标准详见 .ralph/specs/requirements.md 第 9 节
+- 每完成一个 [ ] 项，标记为 [x] 并移动到 Completed 区域
