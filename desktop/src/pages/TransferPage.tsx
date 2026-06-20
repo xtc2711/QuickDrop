@@ -6,6 +6,8 @@
 import { useState, useCallback, DragEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { TransferProgress, TransferStatus } from "../../../../shared/types/index";
+import { webrtcService } from "../services/webrtc";
+import { wsService } from "../services/websocket";
 
 interface FileItem {
   id: string;
@@ -20,6 +22,8 @@ export default function TransferPage() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [transferring, setTransferring] = useState(false);
+  const [connectingDevice, setConnectingDevice] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const addFiles = useCallback((fileList: globalThis.FileList | globalThis.File[]) => {
     const newFiles: FileItem[] = Array.from(fileList).map((file) => ({
@@ -72,10 +76,54 @@ export default function TransferPage() {
   };
 
   const startTransfer = async () => {
+    if (!deviceId) return;
+
     setTransferring(true);
-    // TODO: 实际 WebRTC 传输逻辑将在第 4 周实现
-    // 目前仅模拟 UI 流程
-    setTransferring(false);
+    setConnectionError(null);
+    setConnectingDevice(deviceId);
+
+    // 注册连接成功回调 → 后续文件传输引擎使用
+    webrtcService.setDataChannelReadyHandler((devId, _dc) => {
+      console.log(`✅ DataChannel ready for device ${devId}`);
+      setConnectingDevice(null);
+      // 将文件状态更新为 connecting → 等待后续传输引擎
+      setFiles((prev) =>
+        prev.map((f) => ({
+          ...f,
+          progress: { ...f.progress, status: "connecting" as TransferStatus },
+        })),
+      );
+      // TODO (Week 4 Item 2): 通过 DataChannel 发送文件数据
+    });
+
+    // 注册连接状态回调
+    webrtcService.setConnectionChangeHandler((_devId, state) => {
+      if (state === "failed") {
+        setConnectionError("连接设备失败，请检查对方是否在线后重试");
+        setTransferring(false);
+        setConnectingDevice(null);
+      }
+      if (state === "connected") {
+        setConnectingDevice(null);
+      }
+      if (state === "disconnected") {
+        setConnectionError("设备连接已断开");
+        setTransferring(false);
+        setConnectingDevice(null);
+      }
+    });
+
+    // 发起 WebRTC 连接（作为 Offer 侧）
+    try {
+      await webrtcService.createOffer(deviceId, (msg) => {
+        wsService.send(msg.type, msg.payload, msg.target);
+      });
+    } catch (err) {
+      console.error("Failed to create WebRTC offer:", err);
+      setConnectionError("创建 P2P 连接失败，请重试");
+      setTransferring(false);
+      setConnectingDevice(null);
+    }
   };
 
   const formatSize = (bytes: number): string => {
@@ -214,6 +262,27 @@ export default function TransferPage() {
               </div>
             ))}
           </div>
+
+          {connectingDevice && (
+            <div style={{
+              textAlign: "center",
+              padding: "10px 0",
+              fontSize: 13,
+              color: "var(--color-primary)",
+            }}>
+              🔗 正在建立 P2P 加密直连...
+            </div>
+          )}
+          {connectionError && (
+            <div style={{
+              textAlign: "center",
+              padding: "10px 0",
+              fontSize: 13,
+              color: "var(--color-danger)",
+            }}>
+              ❌ {connectionError}
+            </div>
+          )}
 
           <button
             className="btn-primary"

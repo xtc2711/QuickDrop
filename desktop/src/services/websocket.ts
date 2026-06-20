@@ -5,6 +5,7 @@
 
 import { useAuthStore } from "../stores/authStore";
 import { useDeviceStore } from "../stores/deviceStore";
+import { webrtcService } from "./webrtc";
 
 const SIGNAL_WS = "ws://localhost:3002";
 
@@ -135,6 +136,39 @@ class WebSocketService {
         useAuthStore.getState().logout();
         this.disconnect();
         break;
+
+      // --- WebRTC 信令透传 ---
+
+      case "offer": {
+        const { from_device_id, sdp } = message.payload as {
+          from_device_id: string;
+          sdp: RTCSessionDescriptionInit;
+        };
+        webrtcService.handleOffer(from_device_id, sdp, (msg) =>
+          this.send(msg.type, msg.payload, msg.target),
+        );
+        break;
+      }
+
+      case "answer": {
+        const { from_device_id, sdp } = message.payload as {
+          from_device_id: string;
+          sdp: RTCSessionDescriptionInit;
+        };
+        webrtcService.handleAnswer(from_device_id, sdp);
+        break;
+      }
+
+      case "ice_candidate": {
+        const { from_device_id, ...candidateInit } = message.payload as {
+          from_device_id: string;
+          candidate: string;
+          sdpMid: string | null;
+          sdpMLineIndex: number | null;
+        };
+        webrtcService.handleIceCandidate(from_device_id, candidateInit);
+        break;
+      }
 
       default:
         // 其他消息（信令等）由对应的 handler 处理
