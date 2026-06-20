@@ -6,7 +6,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { AppError } from "../utils/AppError.js";
 
-interface RateLimitOptions {
+export interface RateLimitOptions {
   windowMs: number; // 时间窗口（毫秒）
   max: number; // 最大请求次数
 }

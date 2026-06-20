@@ -8,8 +8,9 @@ import type { WsJwtPayload } from "../middleware/authMiddleware.js";
 import type { WsMessage } from "../models/types.js";
 import { pairingService } from "../services/pairingService.js";
 import { deviceManager } from "../services/deviceManager.js";
+import { getSignalRateLimit } from "../config/rateLimit.js";
 
-// 简化版 IP 限速存储（配对码验证限速 5 次/60秒）
+// 配对码验证限速存储（配置化）
 const joinRateLimiter = new Map<string, { count: number; resetAt: number }>();
 
 /**
@@ -92,22 +93,23 @@ function handleJoinPairing(ws: WebSocket, sender: WsJwtPayload, payload: unknown
     os?: string;
   };
 
-  // 限速检查
+  // 限速检查（从环境变量配置）
+  const { windowMs: pairWindowMs, max: pairMax } = getSignalRateLimit("JOIN_PAIRING");
   const clientKey = sender.sub; // 按用户限速（实际生产可用 IP）
   const now = Date.now();
   let rateEntry = joinRateLimiter.get(clientKey);
 
   if (!rateEntry || rateEntry.resetAt <= now) {
-    rateEntry = { count: 0, resetAt: now + 60_000 };
+    rateEntry = { count: 0, resetAt: now + pairWindowMs };
     joinRateLimiter.set(clientKey, rateEntry);
   }
 
   rateEntry.count++;
-  if (rateEntry.count > 5) {
+  if (rateEntry.count > pairMax) {
     ws.send(
       JSON.stringify({
         type: "error",
-        payload: { message: "配对尝试过于频繁，请 60 秒后重试" },
+        payload: { message: `配对尝试过于频繁，请 ${Math.ceil(pairWindowMs / 1000)} 秒后重试` },
         timestamp: new Date().toISOString(),
       }),
     );

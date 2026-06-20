@@ -8,6 +8,7 @@ import { registerSchema, loginSchema, refreshSchema, logoutSchema, changePasswor
 import { AuthService } from "../services/authService.js";
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
+import { getRateLimit } from "../config/rateLimit.js";
 import { AppError } from "../utils/AppError.js";
 
 export const authRouter = Router();
@@ -20,7 +21,7 @@ const authService = new AuthService();
  */
 authRouter.post(
   "/register",
-  rateLimitMiddleware({ windowMs: 3600_000, max: 5 }),
+  rateLimitMiddleware(getRateLimit("REGISTER")),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = registerSchema.safeParse(req.body);
@@ -42,7 +43,7 @@ authRouter.post(
  */
 authRouter.post(
   "/login",
-  rateLimitMiddleware({ windowMs: 60_000, max: 10 }),
+  rateLimitMiddleware(getRateLimit("LOGIN")),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = loginSchema.safeParse(req.body);
@@ -113,7 +114,7 @@ authRouter.post(
 authRouter.post(
   "/change-password",
   authenticateToken,
-  rateLimitMiddleware({ windowMs: 60_000, max: 3 }),
+  rateLimitMiddleware(getRateLimit("CHANGE_PASSWORD")),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = changePasswordSchema.safeParse(req.body);
@@ -146,7 +147,7 @@ authRouter.post(
  */
 authRouter.post(
   "/forgot-password",
-  rateLimitMiddleware({ windowMs: 3600_000, max: 3 }),
+  rateLimitMiddleware(getRateLimit("FORGOT_PASSWORD")),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = forgotPasswordSchema.safeParse(req.body);
@@ -168,7 +169,7 @@ authRouter.post(
  */
 authRouter.post(
   "/reset-password",
-  rateLimitMiddleware({ windowMs: 3600_000, max: 5 }),
+  rateLimitMiddleware(getRateLimit("RESET_PASSWORD")),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = resetPasswordSchema.safeParse(req.body);
