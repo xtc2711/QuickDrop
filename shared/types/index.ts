@@ -180,6 +180,53 @@ export interface TransferResult {
   error_message?: string;
 }
 
+// ---------- 文件传输协议控制消息 ----------
+// 通过 DataChannel 传输，字符串类型为 JSON 控制消息，二进制类型为分块数据
+
+export interface FileMetaMessage {
+  type: "meta";
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  totalChunks: number;
+  chunkSize: number;
+}
+
+export interface FileAckMessage {
+  type: "ack";
+  fileId: string;
+  chunkIndex: number;
+  status: "ok" | "crc_error";
+}
+
+export interface FileCompleteMessage {
+  type: "complete";
+  fileId: string;
+  sha256: string; // hex 编码
+}
+
+export interface FileVerifyMessage {
+  type: "verify";
+  fileId: string;
+  match: boolean;
+}
+
+/** 所有 DataChannel 控制消息的联合类型 */
+export type FileControlMessage =
+  | FileMetaMessage
+  | FileAckMessage
+  | FileCompleteMessage
+  | FileVerifyMessage;
+
+/** 二进制分块消息的头部结构（接收端解析用） */
+export interface ChunkHeader {
+  fileId: string;
+  chunkIndex: number;
+  crc32: number;
+  data: ArrayBuffer;
+}
+
 // ---------- 连接通道 ----------
 
 export type ConnectionChannel = "bluetooth" | "lan_p2p" | "turn_relay";

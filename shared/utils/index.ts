@@ -89,3 +89,47 @@ export const MAX_RETRY_COUNT = 3;
 export const PAIRING_CODE_TTL_MS = 2 * 60 * 1000; // 2 分钟
 export const HEARTBEAT_INTERVAL_MS = 15_000; // 15 秒
 export const HEARTBEAT_TIMEOUT_MS = 30_000; // 30 秒超时
+export const FLOW_CONTROL_WINDOW = 16; // 流控窗口大小（同时最多在途分块数）
+export const BUFFERED_AMOUNT_THRESHOLD = 256 * 1024; // 256KB 缓冲区阈值
+
+// ============================================================
+// CRC32 校验 — IEEE 802.3 标准多项式
+// 用于每个 16KB 分块的数据完整性校验
+// ============================================================
+
+/** CRC-32/IEEE 802.3 查找表（多项式 0xEDB88320） */
+const CRC32_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let crc = i;
+    for (let j = 0; j < 8; j++) {
+      crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+    table[i] = crc;
+  }
+  return table;
+})();
+
+/**
+ * 计算 ArrayBuffer 的 CRC32 校验值
+ * 与 gzip/PNG/zlib 使用的 CRC-32/IEEE 802.3 一致
+ */
+export function crc32(data: ArrayBuffer, initialCrc = 0xffffffff): number {
+  const view = new Uint8Array(data);
+  let crc = initialCrc;
+  for (let i = 0; i < view.length; i++) {
+    crc = CRC32_TABLE[(crc ^ view[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0; // 转为无符号 32 位
+}
+
+/**
+ * 流式 CRC32 累积计算
+ * 用于分块场景：crc32Concat(prevCrc, nextChunk)
+ * prevCrc 需先经过 finalXor（即 crc32 的返回值）
+ */
+export function crc32Continue(prevResult: number, data: ArrayBuffer): number {
+  // 将上次的最终结果还原为中间状态
+  const intermediate = (prevResult ^ 0xffffffff) >>> 0;
+  return crc32(data, intermediate);
+}

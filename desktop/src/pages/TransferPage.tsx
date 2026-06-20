@@ -1,6 +1,8 @@
 // ============================================================
 // 桌面客户端 — 文件传输页面
 // 支持拖拽传输和文件选择传输
+// 集成 FileTransferService 引擎：分块发送、CRC32 校验、
+// SHA256 完整性验证、进度跟踪、并行队列
 // ============================================================
 
 import { useState, useCallback, DragEvent } from "react";
@@ -8,11 +10,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import type { TransferProgress, TransferStatus } from "../../../../shared/types/index";
 import { webrtcService } from "../services/webrtc";
 import { wsService } from "../services/websocket";
+import { fileTransferService } from "../services/fileTransfer";
+import type { TransferCallbacks } from "../services/fileTransfer";
 
 interface FileItem {
   id: string;
   file: globalThis.File;
   progress: TransferProgress;
+  cancelFn?: () => void;
 }
 
 export default function TransferPage() {
@@ -40,7 +45,7 @@ export default function TransferPage() {
         status: "pending" as TransferStatus,
       },
     }));
-    setFiles((prev) => [...prev, ...newFiles].slice(0, 20)); // 最多 20 个文件
+    setFiles((prev) => [...prev, ...newFiles].slice(0, 20));
   }, []);
 
   const handleDragOver = (e: DragEvent) => {
@@ -72,8 +77,55 @@ export default function TransferPage() {
   };
 
   const removeFile = (fileId: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== fileId));
+    setFiles((prev) => {
+      const item = prev.find((f) => f.id === fileId);
+      if (item?.cancelFn) item.cancelFn();
+      return prev.filter((f) => f.id !== fileId);
+    });
   };
+
+  /**
+   * 更新单个文件的进度
+   */
+  const updateFileProgress = useCallback((progress: TransferProgress) => {
+    setFiles((prev) =>
+      prev.map((f) => {
+        // 通过文件名匹配（同一文件可能被多次传输）
+        if (f.file.name === progress.file_name && f.progress.status !== "completed") {
+          return { ...f, progress };
+        }
+        return f;
+      }),
+    );
+  }, []);
+
+  /**
+   * 处理传输完成
+   */
+  const handleTransferComplete = useCallback(
+    (fileId: string, fileName: string, success: boolean) => {
+      setFiles((prev) =>
+        prev.map((f) => {
+          if (
+            f.file.name === fileName &&
+            f.progress.status !== "completed"
+          ) {
+            return {
+              ...f,
+              progress: {
+                ...f.progress,
+                file_id: fileId,
+                status: success ? "completed" : ("failed" as TransferStatus),
+                percentage: success ? 100 : f.progress.percentage,
+              },
+            };
+          }
+          return f;
+        }),
+      );
+    },
+    [],
+  );
 
   const startTransfer = async () => {
     if (!deviceId) return;
@@ -82,18 +134,74 @@ export default function TransferPage() {
     setConnectionError(null);
     setConnectingDevice(deviceId);
 
-    // 注册连接成功回调 → 后续文件传输引擎使用
-    webrtcService.setDataChannelReadyHandler((devId, _dc) => {
+    // 注册连接成功回调 — 启动文件传输
+    webrtcService.setDataChannelReadyHandler((devId, dc) => {
       console.log(`✅ DataChannel ready for device ${devId}`);
       setConnectingDevice(null);
-      // 将文件状态更新为 connecting → 等待后续传输引擎
-      setFiles((prev) =>
-        prev.map((f) => ({
-          ...f,
-          progress: { ...f.progress, status: "connecting" as TransferStatus },
-        })),
-      );
-      // TODO (Week 4 Item 2): 通过 DataChannel 发送文件数据
+
+      // 为接收方向设置监听（接收文件时使用）
+      const receiveCallbacks: TransferCallbacks = {
+        onProgress: (progress) => updateFileProgress(progress),
+        onComplete: (result) =>
+          handleTransferComplete(
+            result.file_id,
+            result.file_name,
+            result.success,
+          ),
+        onError: (fid, err) =>
+          console.error(`接收文件错误 [${fid}]:`, err),
+      };
+      fileTransferService.setReceiveCallbacks(dc, receiveCallbacks);
+
+      // 为每个待传输文件创建发送传输
+      setFiles((prev) => {
+        const pending = prev.filter(
+          (f) => f.progress.status === "pending" || f.progress.status === "connecting",
+        );
+
+        if (pending.length === 0) {
+          setTransferring(false);
+          return prev;
+        }
+
+        return prev.map((f) => {
+          if (
+            f.progress.status !== "pending" &&
+            f.progress.status !== "connecting"
+          ) {
+            return f;
+          }
+
+          // 创建传输回调
+          const callbacks: TransferCallbacks = {
+            onProgress: (progress) => updateFileProgress(progress),
+            onComplete: (result) =>
+              handleTransferComplete(
+                result.file_id,
+                result.file_name,
+                result.success,
+              ),
+            onError: (fid, err) => {
+              console.error(`发送文件错误 [${fid}]:`, err);
+              handleTransferComplete(fid, f.file.name, false);
+            },
+          };
+
+          // 启动发送
+          const cancelFn = fileTransferService.sendFile(
+            devId,
+            f.file,
+            dc,
+            callbacks,
+          );
+
+          return {
+            ...f,
+            cancelFn,
+            progress: { ...f.progress, status: "connecting" as TransferStatus },
+          };
+        });
+      });
     });
 
     // 注册连接状态回调
@@ -133,6 +241,19 @@ export default function TransferPage() {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
+  const formatSpeed = (bps: number): string => {
+    if (bps < 1024) return `${bps} B/s`;
+    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+    return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
+  };
+
+  const formatEta = (seconds: number): string => {
+    if (seconds <= 0) return "--";
+    if (seconds < 60) return `${seconds}秒`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+    return `${Math.floor(seconds / 3600)}时${Math.floor((seconds % 3600) / 60)}分`;
+  };
+
   const getStatusLabel = (status: TransferStatus): string => {
     const labels: Record<TransferStatus, string> = {
       pending: "等待中",
@@ -159,6 +280,16 @@ export default function TransferPage() {
     return colors[status];
   };
 
+  const completedCount = files.filter(
+    (f) => f.progress.status === "completed",
+  ).length;
+  const activeTransfers = files.filter(
+    (f) =>
+      f.progress.status === "transferring" ||
+      f.progress.status === "verifying" ||
+      f.progress.status === "connecting",
+  ).length;
+
   return (
     <div className="page-container" style={{ maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
@@ -181,12 +312,12 @@ export default function TransferPage() {
           background: isDragOver ? "var(--color-primary-light)" : "var(--color-surface)",
           transition: "all 0.2s",
           marginBottom: 16,
+          opacity: transferring ? 0.6 : 1,
+          pointerEvents: transferring ? "none" : "auto",
         }}
       >
         <div style={{ fontSize: 48, marginBottom: 12 }}>📁</div>
-        <p style={{ fontSize: 15, fontWeight: 500 }}>
-          拖拽文件到这里
-        </p>
+        <p style={{ fontSize: 15, fontWeight: 500 }}>拖拽文件到这里</p>
         <p style={{ fontSize: 13, color: "var(--color-text-secondary)", marginTop: 4 }}>
           或
         </p>
@@ -194,6 +325,7 @@ export default function TransferPage() {
           className="btn-primary"
           onClick={handleFileSelect}
           style={{ marginTop: 8 }}
+          disabled={transferring}
         >
           选择文件
         </button>
@@ -202,9 +334,24 @@ export default function TransferPage() {
       {/* 文件列表 */}
       {files.length > 0 && (
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-            待传输文件（{files.length}）
-          </h2>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 8,
+            }}
+          >
+            <h2 style={{ fontSize: 16, fontWeight: 600 }}>
+              待传输文件（{files.length}）
+            </h2>
+            {activeTransfers > 0 && (
+              <span style={{ fontSize: 12, color: "var(--color-primary)" }}>
+                活跃: {activeTransfers} / 已完成: {completedCount}
+              </span>
+            )}
+          </div>
+
           <div className="card" style={{ padding: 0 }}>
             {files.map((item) => (
               <div
@@ -217,19 +364,43 @@ export default function TransferPage() {
                   gap: 12,
                 }}
               >
-                <span style={{ fontSize: 20 }}>📄</span>
+                <span style={{ fontSize: 20 }}>
+                  {item.progress.status === "completed"
+                    ? "✅"
+                    : item.progress.status === "failed"
+                      ? "❌"
+                      : item.progress.status === "transferring"
+                        ? "📤"
+                        : item.progress.status === "verifying"
+                          ? "🔍"
+                          : "📄"}
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div
+                    style={{
+                      fontWeight: 500,
+                      fontSize: 14,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {item.file.name}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
-                    {formatSize(item.file.size)} ·{" "}
+                    {formatSize(item.file.size)}
+                    {item.progress.status === "transferring" &&
+                      ` · ${formatSpeed(item.progress.speed_bps)} · 剩余 ${formatEta(item.progress.eta_seconds)}`}
+                    {" · "}
                     <span style={{ color: getStatusColor(item.progress.status) }}>
                       {getStatusLabel(item.progress.status)}
+                      {item.progress.status === "transferring" &&
+                        ` ${item.progress.percentage}%`}
                     </span>
                   </div>
-                  {item.progress.status === "transferring" && (
-                    <div style={{ marginTop: 4 }}>
+                  {(item.progress.status === "transferring" ||
+                    item.progress.status === "verifying") && (
+                    <div style={{ marginTop: 6 }}>
                       <div
                         style={{
                           height: 4,
@@ -242,8 +413,11 @@ export default function TransferPage() {
                           style={{
                             height: "100%",
                             width: `${item.progress.percentage}%`,
-                            background: "var(--color-primary)",
-                            transition: "width 0.3s",
+                            background:
+                              item.progress.status === "verifying"
+                                ? "var(--color-warning)"
+                                : "var(--color-primary)",
+                            transition: "width 0.3s ease",
                           }}
                         />
                       </div>
@@ -259,27 +433,41 @@ export default function TransferPage() {
                     ✕
                   </button>
                 )}
+                {(item.progress.status === "transferring" ||
+                  item.progress.status === "connecting") && (
+                  <button
+                    className="btn-ghost"
+                    onClick={() => removeFile(item.id)}
+                    style={{ fontSize: 12, padding: "4px 8px", color: "var(--color-danger)" }}
+                  >
+                    取消
+                  </button>
+                )}
               </div>
             ))}
           </div>
 
           {connectingDevice && (
-            <div style={{
-              textAlign: "center",
-              padding: "10px 0",
-              fontSize: 13,
-              color: "var(--color-primary)",
-            }}>
+            <div
+              style={{
+                textAlign: "center",
+                padding: "10px 0",
+                fontSize: 13,
+                color: "var(--color-primary)",
+              }}
+            >
               🔗 正在建立 P2P 加密直连...
             </div>
           )}
           {connectionError && (
-            <div style={{
-              textAlign: "center",
-              padding: "10px 0",
-              fontSize: 13,
-              color: "var(--color-danger)",
-            }}>
+            <div
+              style={{
+                textAlign: "center",
+                padding: "10px 0",
+                fontSize: 13,
+                color: "var(--color-danger)",
+              }}
+            >
               ❌ {connectionError}
             </div>
           )}
@@ -290,7 +478,11 @@ export default function TransferPage() {
             disabled={transferring}
             style={{ width: "100%", padding: 12, marginTop: 16 }}
           >
-            {transferring ? "准备传输..." : `开始传输 (${files.length} 个文件)`}
+            {transferring
+              ? activeTransfers > 0
+                ? `传输中... (${completedCount}/${files.length})`
+                : "准备传输..."
+              : `开始传输 (${files.length} 个文件)`}
           </button>
         </div>
       )}
