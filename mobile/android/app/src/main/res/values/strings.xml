@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QuickDrop</string>
+    <string name="channel_transfer">文件传输</string>
+    <string name="channel_transfer_desc">正在进行文件传输</string>
+    <string name="scan_qr_title">扫描二维码</string>
+    <string name="pairing_code_hint">输入 6 位配对码</string>
+    <string name="device_list_my_devices">我的设备</string>
+    <string name="device_list_temp_devices">临时配对设备</string>
+    <string name="no_devices">暂无在线设备</string>
+    <string name="transfer_sending">正在发送…</string>
+    <string name="transfer_receiving">正在接收…</string>
+    <string name="transfer_complete">传输完成</string>
+    <string name="transfer_failed">传输失败</string>
+    <string name="permission_camera_required">需要相机权限以扫描二维码</string>
+    <string name="permission_storage_required">需要存储权限以访问文件</string>
+    <string name="permission_notification_required">需要通知权限以在后台传输文件</string>
+</resources>

@@ -180,5 +180,6 @@ class DeviceManager {
   }
 }
 
-// 单例导出
+// 导出类和单例（类导出供测试使用）
+export { DeviceManager };
 export const deviceManager = new DeviceManager();

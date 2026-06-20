@@ -4,7 +4,7 @@
 
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
-import { registerSchema, loginSchema, refreshSchema, logoutSchema, changePasswordSchema } from "../models/schemas.js";
+import { registerSchema, loginSchema, refreshSchema, logoutSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema } from "../models/schemas.js";
 import { AuthService } from "../services/authService.js";
 import { rateLimitMiddleware } from "../middleware/rateLimiter.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
@@ -131,6 +131,54 @@ authRouter.post(
         parsed.data,
         jti,
         exp,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/v1/auth/forgot-password
+ * 请求密码重置（无需登录）
+ * 即使用户不存在也返回相同消息，防止邮箱枚举攻击
+ */
+authRouter.post(
+  "/forgot-password",
+  rateLimitMiddleware({ windowMs: 3600_000, max: 3 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = forgotPasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new AppError(400, "请求参数校验失败", parsed.error.flatten());
+      }
+
+      const result = await authService.requestPasswordReset(parsed.data.email);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/v1/auth/reset-password
+ * 使用重置令牌重置密码（无需登录）
+ */
+authRouter.post(
+  "/reset-password",
+  rateLimitMiddleware({ windowMs: 3600_000, max: 5 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = resetPasswordSchema.safeParse(req.body);
+      if (!parsed.success) {
+        throw new AppError(400, "请求参数校验失败", parsed.error.flatten());
+      }
+
+      const result = await authService.resetPassword(
+        parsed.data.token,
+        parsed.data.new_password,
       );
       res.json(result);
     } catch (err) {

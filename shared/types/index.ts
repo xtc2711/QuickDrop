@@ -38,6 +38,15 @@ export interface ChangePasswordRequest {
   revoke_all_devices?: boolean; // 默认 true，修改密码后强制其他设备重新登录
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  new_password: string;
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

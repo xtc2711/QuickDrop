@@ -28,9 +28,12 @@ export class DeviceService {
       last_seen: d.lastSeen.toISOString(),
     }));
 
-    // 同账户设备（所有设备都是同账户的）
+    // 返回所有活跃设备（含在线和离线），按在线优先 + 最后活跃时间排序
     return {
-      my_devices: deviceInfos.filter((d) => d.is_online),
+      my_devices: deviceInfos.sort((a, b) => {
+        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
+        return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+      }),
       paired_devices: [], // 临时配对设备由信令服务管理
     };
   }

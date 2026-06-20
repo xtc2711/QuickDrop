@@ -23,8 +23,9 @@ model User {
   lockedUntil          DateTime? @map("locked_until")
   failedLoginAttempts  Int       @default(0) @map("failed_login_attempts")
 
-  devices        Device[]
-  refreshTokens  RefreshToken[]
+  devices            Device[]
+  refreshTokens      RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -71,6 +72,20 @@ model TokenBlacklist {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("token_blacklist")
+}
+
+/// 密码重置令牌表
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
 }
 
 /// 配对码表

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主主题：Material 3 -->
+    <style name="Theme.QuickDrop" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="colorPrimaryContainer">@color/primaryContainer</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorOnSecondary">@color/onSecondary</item>
+        <item name="colorError">@color/error</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:statusBarColor">@color/primary</item>
+        <item name="android:navigationBarColor">@color/background</item>
+    </style>
+
+    <!-- 启动画面主题 -->
+    <style name="Theme.QuickDrop.Splash" parent="Theme.QuickDrop">
+        <item name="android:windowBackground">@color/primary</item>
+    </style>
+
+    <!-- 全屏主题（扫码页面） -->
+    <style name="Theme.QuickDrop.Fullscreen" parent="Theme.QuickDrop">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

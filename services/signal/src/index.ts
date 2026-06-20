@@ -1,23 +1,69 @@
 // ============================================================
 // QuickDrop 信令服务 — 入口文件
 // WebSocket 服务: 设备管理、配对、WebRTC 信令转发
+// HTTP 端点: 健康检查、force_logout 推送
 // ============================================================
 
 import { WebSocketServer } from "ws";
 import dotenv from "dotenv";
-import { createServer } from "http";
+import { createServer, IncomingMessage, ServerResponse } from "http";
 import { authenticateWebSocket } from "./middleware/authMiddleware.js";
 import { handleConnection } from "./handlers/connectionHandler.js";
+import { deviceManager } from "./services/deviceManager.js";
 
 dotenv.config();
 
 const PORT = parseInt(process.env.PORT || "3002", 10);
 
-// HTTP 服务（健康检查）
-const httpServer = createServer((_req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "ok", service: "signal", timestamp: new Date().toISOString() }));
-});
+/**
+ * 简单的 HTTP 路由器
+ */
+function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+  // 健康检查
+  if (req.method === "GET" && url.pathname === "/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok", service: "signal", timestamp: new Date().toISOString() }));
+    return;
+  }
+
+  // POST /force-logout — 接收来自认证服务的强制下线请求
+  if (req.method === "POST" && url.pathname === "/force-logout") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      try {
+        const { device_id } = JSON.parse(body);
+        if (!device_id) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "缺少 device_id" }));
+          return;
+        }
+
+        const sent = deviceManager.sendToDevice(device_id, {
+          type: "force_logout",
+          payload: { reason: "device_removed" },
+          timestamp: new Date().toISOString(),
+        });
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, delivered: sent }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "无效的 JSON 请求体" }));
+      }
+    });
+    return;
+  }
+
+  // 404
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "未找到" }));
+}
+
+// HTTP 服务
+const httpServer = createServer(handleHttpRequest);
 
 // WebSocket 服务
 const wss = new WebSocketServer({ server: httpServer });
@@ -48,6 +94,7 @@ wss.on("error", (err) => {
 httpServer.listen(PORT, () => {
   console.log(`📶 Signal service running on ws://localhost:${PORT}`);
   console.log(`   Health check: http://localhost:${PORT}/`);
+  console.log(`   Force logout: POST http://localhost:${PORT}/force-logout`);
 });
 
 export { wss };

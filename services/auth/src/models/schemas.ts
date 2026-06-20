@@ -44,6 +44,29 @@ export const logoutSchema = z.object({
   all_devices: z.boolean().optional().default(false),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .max(255, "邮箱不能超过 255 个字符")
+    .refine((v) => validateEmail(v), "邮箱格式不正确"),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1, "重置令牌不能为空"),
+    new_password: z
+      .string()
+      .min(8, "新密码至少 8 位")
+      .max(128, "新密码不能超过 128 位"),
+  })
+  .refine(
+    (data) => {
+      const result = validatePasswordStrength(data.new_password);
+      return result.valid;
+    },
+    { message: "新密码必须包含大写字母、小写字母和数字", path: ["new_password"] },
+  );
+
 export const changePasswordSchema = z
   .object({
     old_password: z.string().min(1, "当前密码不能为空"),
@@ -68,3 +91,5 @@ export const changePasswordSchema = z
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;

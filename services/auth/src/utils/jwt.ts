@@ -2,6 +2,7 @@
 // 认证服务 — JWT Token 工具
 // ============================================================
 
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
 
@@ -108,4 +109,11 @@ export function getTokenExpiry(token: string): Date {
     return new Date(Date.now() + 30 * 24 * 3600 * 1000); // 默认 30 天
   }
   return new Date(decoded.exp * 1000);
+}
+
+/**
+ * 对 Refresh Token 进行 SHA-256 哈希（确定性哈希，用于数据库存储和查找）
+ */
+export function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }

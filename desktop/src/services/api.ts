@@ -7,8 +7,10 @@ import { useAuthStore } from "../stores/authStore";
 import type {
   AuthResponse,
   ChangePasswordRequest,
+  ForgotPasswordRequest,
   LoginRequest,
   RegisterRequest,
+  ResetPasswordRequest,
 } from "../../../shared/types/index";
 
 const AUTH_BASE = "http://localhost:3001/api/v1";
@@ -91,6 +93,30 @@ export async function logout(allDevices = false): Promise<void> {
     method: "POST",
     body: JSON.stringify({ all_devices: allDevices }),
   });
+}
+
+/**
+ * 忘记密码 — 请求重置邮件
+ */
+export async function forgotPassword(
+  data: ForgotPasswordRequest,
+): Promise<{ message: string }> {
+  return request<{ message: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }, false);
+}
+
+/**
+ * 重置密码 — 使用邮件中的令牌
+ */
+export async function resetPassword(
+  data: ResetPasswordRequest,
+): Promise<{ message: string }> {
+  return request<{ message: string }>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }, false);
 }
 
 /**

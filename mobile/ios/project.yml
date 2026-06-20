@@ -1,0 +1,59 @@
+# QuickDrop iOS — XcodeGen Project Spec
+#
+# 使用 XcodeGen 生成 .xcodeproj：
+#   $ brew install xcodegen
+#   $ cd mobile/ios && xcodegen generate
+#
+# 如需手动创建 Xcode 项目：
+#   1. 打开 Xcode → New Project → iOS App
+#   2. Product Name: QuickDrop, Interface: Storyboard, Language: Swift
+#   3. 将所有 .swift 文件拖入项目
+#   4. 将 Resources/web/ 添加为 Folder Reference
+
+name: QuickDrop
+options:
+  bundleIdPrefix: com.quickdrop
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    INFOPLIST_FILE: QuickDrop/Info.plist
+    DEVELOPMENT_TEAM: "" # 设置你的 Apple Developer Team ID
+
+targets:
+  QuickDrop:
+    type: application
+    platform: iOS
+    sources:
+      - path: QuickDrop
+        type: group
+      - path: Resources/web
+        type: folder
+        name: web
+        createIntermediateGroups: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.quickdrop.app
+        INFOPLIST_FILE: QuickDrop/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2" # iPhone, iPad
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+        # WebRTC 需要
+        OTHER_LINKER_FLAGS: "-framework WebKit -framework AVFoundation"
+    preBuildScripts:
+      - name: "Lint (Optional)"
+        script: |
+          if which swiftlint >/dev/null; then
+            swiftlint
+          fi
+    configs:
+      Debug:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+      Release:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: ""
+        SWIFT_OPTIMIZATION_LEVEL: "-O"

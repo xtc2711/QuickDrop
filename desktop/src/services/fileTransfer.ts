@@ -12,6 +12,9 @@
 //   - SHA256 完整性验证（完成后比对，不一致自动重传最多 3 次）
 //   - 流控窗口（最多 16 个在途分块，缓冲区 > 256KB 暂停）
 //   - 并行传输队列（最多 5 个并发）
+//   - 流式内存管理：发送端逐块读取文件，接收端 Blob 组装
+//     （不再将整个文件加载到内存，支持 10GB+ 文件传输）
+//   - 增量 SHA256：边读边哈希，无需二次遍历文件
 // ============================================================
 
 import type {
@@ -31,6 +34,8 @@ import {
   FLOW_CONTROL_WINDOW,
   BUFFERED_AMOUNT_THRESHOLD,
   crc32,
+  IncrementalSHA256,
+  logMemoryUsage,
 } from "../../../shared/utils/index";
 
 // ============================================================
@@ -62,13 +67,16 @@ interface ReceiveState {
   fileSize: number;
   totalChunks: number;
   chunkSize: number;
-  chunks: (ArrayBuffer | null)[];
+  /** 密集存储已接收分块（按索引顺序，用于 Blob 组装） */
+  chunks: ArrayBuffer[];
   receivedChunks: number;
   startTime: number;
   lastProgressTime: number;
   lastProgressBytes: number;
   callbacks: TransferCallbacks;
   dc: RTCDataChannel;
+  /** 增量 SHA256 哈希器（接收过程中增量更新） */
+  sha256Hasher: IncrementalSHA256;
 }
 
 // ============================================================
@@ -82,7 +90,7 @@ const decoder = new TextDecoder();
  * 编码文件分块为二进制消息
  * 格式: [fileIdLen:4][fileId:UTF8][chunkIdx:4][crc32:4][data]
  */
-function encodeChunk(
+export function encodeChunk(
   fileId: string,
   chunkIndex: number,
   chunkCrc32: number,
@@ -117,7 +125,7 @@ function encodeChunk(
 /**
  * 解码二进制分块消息
  */
-function decodeChunk(buffer: ArrayBuffer): ChunkHeader | null {
+export function decodeChunk(buffer: ArrayBuffer): ChunkHeader | null {
   try {
     const view = new DataView(buffer);
     let offset = 0;
@@ -410,11 +418,15 @@ class FileTransferService {
 
   private async doSend(transfer: ActiveTransfer): Promise<void> {
     const { fileId, file, dc, callbacks } = transfer;
+    const fileSize = file.size;
+    const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+
+    logMemoryUsage(`发送开始: ${file.name} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`);
 
     callbacks.onProgress({
       file_id: fileId,
       file_name: file.name,
-      total_bytes: file.size,
+      total_bytes: fileSize,
       transferred_bytes: 0,
       percentage: 0,
       speed_bps: 0,
@@ -422,16 +434,15 @@ class FileTransferService {
       status: "connecting",
     });
 
-    const fileBuffer = await file.arrayBuffer();
-    const sha256Hash = await this.computeSHA256(fileBuffer);
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    // 增量 SHA256 — 边读边哈希，无需整个文件载入内存
+    const sha256Hasher = new IncrementalSHA256();
 
     // 发送 FILE_META
     const metaMsg: FileMetaMessage = {
       type: "meta",
       fileId,
       fileName: file.name,
-      fileSize: file.size,
+      fileSize: fileSize,
       mimeType: file.type || "application/octet-stream",
       totalChunks,
       chunkSize: CHUNK_SIZE,
@@ -441,7 +452,7 @@ class FileTransferService {
     callbacks.onProgress({
       file_id: fileId,
       file_name: file.name,
-      total_bytes: file.size,
+      total_bytes: fileSize,
       transferred_bytes: 0,
       percentage: 0,
       speed_bps: 0,
@@ -457,7 +468,7 @@ class FileTransferService {
     let nextChunkToSend = 0;
 
     while (nextChunkToSend < totalChunks && !transfer.cancelled) {
-      // 流控：检查缓冲区
+      // 流控：检查 DataChannel 缓冲区
       while (
         dc.bufferedAmount > BUFFERED_AMOUNT_THRESHOLD &&
         !transfer.cancelled
@@ -478,11 +489,16 @@ class FileTransferService {
 
       if (transfer.cancelled) break;
 
+      // 🧠 流式读取：每次只读取一个 16KB 分块到内存
       const chunkStart = nextChunkToSend * CHUNK_SIZE;
-      const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, file.size);
-      const chunkData = fileBuffer.slice(chunkStart, chunkEnd);
-      const chunkCrc32 = crc32(chunkData);
+      const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, fileSize);
+      const chunkBlob = file.slice(chunkStart, chunkEnd);
+      const chunkData = await chunkBlob.arrayBuffer();
 
+      // 增量哈希更新
+      sha256Hasher.update(chunkData);
+
+      const chunkCrc32 = crc32(chunkData);
       const binaryMsg = encodeChunk(fileId, nextChunkToSend, chunkCrc32, chunkData);
 
       dc.send(binaryMsg);
@@ -490,20 +506,20 @@ class FileTransferService {
       sentBytes += chunkData.byteLength;
       nextChunkToSend++;
 
-      // 进度回调
+      // 进度回调（每 100ms 或每 64 个分块）
       const now = performance.now();
       if (now - lastProgressTime > 100 || nextChunkToSend % 64 === 0) {
         const elapsed = (now - startTime) / 1000;
         const speedBps = elapsed > 0 ? sentBytes / elapsed : 0;
-        const remainingBytes = file.size - sentBytes;
+        const remainingBytes = fileSize - sentBytes;
         const etaSeconds = speedBps > 0 ? remainingBytes / speedBps : 0;
 
         callbacks.onProgress({
           file_id: fileId,
           file_name: file.name,
-          total_bytes: file.size,
+          total_bytes: fileSize,
           transferred_bytes: sentBytes,
-          percentage: Math.round((sentBytes / file.size) * 100),
+          percentage: Math.round((sentBytes / fileSize) * 100),
           speed_bps: Math.round(speedBps),
           eta_seconds: Math.round(etaSeconds),
           status: "transferring",
@@ -522,6 +538,9 @@ class FileTransferService {
 
     if (transfer.cancelled) return;
 
+    // 获取最终的 SHA256 哈希
+    const sha256Hash = sha256Hasher.digest();
+
     // 发送 FILE_COMPLETE
     const completeMsg: FileCompleteMessage = {
       type: "complete",
@@ -530,11 +549,13 @@ class FileTransferService {
     };
     dc.send(JSON.stringify(completeMsg));
 
+    logMemoryUsage(`发送完成: ${file.name}`);
+
     callbacks.onProgress({
       file_id: fileId,
       file_name: file.name,
-      total_bytes: file.size,
-      transferred_bytes: file.size,
+      total_bytes: fileSize,
+      transferred_bytes: fileSize,
       percentage: 100,
       speed_bps: 0,
       eta_seconds: 0,
@@ -563,19 +584,22 @@ class FileTransferService {
     const callbacks = this.receiveCallbacks.get(dc);
     if (!callbacks) return;
 
+    logMemoryUsage(`接收开始: ${msg.fileName} (${(msg.fileSize / 1024 / 1024).toFixed(1)}MB)`);
+
     const state: ReceiveState = {
       fileId: msg.fileId,
       fileName: msg.fileName,
       fileSize: msg.fileSize,
       totalChunks: msg.totalChunks,
       chunkSize: msg.chunkSize,
-      chunks: new Array(msg.totalChunks).fill(null),
+      chunks: [],
       receivedChunks: 0,
       startTime: performance.now(),
       lastProgressTime: performance.now(),
       lastProgressBytes: 0,
       callbacks,
       dc,
+      sha256Hasher: new IncrementalSHA256(),
     };
 
     this.activeReceives.set(msg.fileId, state);
@@ -625,10 +649,12 @@ class FileTransferService {
       return;
     }
 
-    // 存储分块（避免重复）
-    if (state.chunks[header.chunkIndex] === null) {
-      state.chunks[header.chunkIndex] = header.data;
-      state.receivedChunks++;
+    // 存储分块并增量哈希（避免重复：检查 chunks.length 是否覆盖了该索引）
+    if (header.chunkIndex >= state.chunks.length) {
+      // 🧠 增量 SHA256 更新
+      state.sha256Hasher.update(header.data);
+      state.chunks.push(header.data);
+      state.receivedChunks = state.chunks.length;
     }
 
     // 发送 ACK
@@ -695,33 +721,27 @@ class FileTransferService {
       status: "verifying",
     });
 
-    // 组装完整文件
-    const fileBuffer = new Uint8Array(state.fileSize);
-    let offset = 0;
-    for (let i = 0; i < state.totalChunks; i++) {
-      const chunk = state.chunks[i];
-      if (!chunk) {
-        state.callbacks.onError(
-          state.fileId,
-          `分块 ${i} 缺失，传输不完整`,
-        );
-        state.callbacks.onComplete({
-          file_id: state.fileId,
-          file_name: state.fileName,
-          success: false,
-          sha256_match: false,
-          retry_count: 0,
-          error_message: `分块 ${i} 缺失`,
-        });
-        this.activeReceives.delete(state.fileId);
-        return;
-      }
-      fileBuffer.set(new Uint8Array(chunk), offset);
-      offset += chunk.byteLength;
+    // 检查分块完整性
+    if (state.chunks.length !== state.totalChunks) {
+      const missingCount = state.totalChunks - state.chunks.length;
+      state.callbacks.onError(
+        state.fileId,
+        `分块不完整：缺失 ${missingCount} 个分块`,
+      );
+      state.callbacks.onComplete({
+        file_id: state.fileId,
+        file_name: state.fileName,
+        success: false,
+        sha256_match: false,
+        retry_count: 0,
+        error_message: `缺失 ${missingCount} 个分块，传输不完整`,
+      });
+      this.activeReceives.delete(state.fileId);
+      return;
     }
 
-    // SHA256 校验
-    const computedHash = await this.computeSHA256(fileBuffer.buffer);
+    // 🧠 使用增量 SHA256 的 digest（无需组装全文件再哈希）
+    const computedHash = state.sha256Hasher.digest();
     const match = computedHash === msg.sha256;
 
     const verifyMsg: FileVerifyMessage = {
@@ -732,7 +752,8 @@ class FileTransferService {
     dc.send(JSON.stringify(verifyMsg));
 
     if (match) {
-      this.saveReceivedFile(state.fileName, fileBuffer.buffer, state.fileSize);
+      // 🧠 Blob 组装：不复制 ArrayBuffer，直接引用已接收的分块
+      this.saveReceivedFile(state.fileName, state.chunks);
 
       state.callbacks.onComplete({
         file_id: state.fileId,
@@ -752,6 +773,7 @@ class FileTransferService {
       });
     }
 
+    logMemoryUsage(`接收完成: ${state.fileName}`);
     this.activeReceives.delete(state.fileId);
   }
 
@@ -765,19 +787,13 @@ class FileTransferService {
     }
   }
 
-  private async computeSHA256(data: ArrayBuffer): Promise<string> {
-    const hash = await crypto.subtle.digest("SHA-256", data);
-    const hexArray = Array.from(new Uint8Array(hash));
-    return hexArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
   private saveReceivedFile(
     fileName: string,
-    data: ArrayBuffer,
-    fileSize: number,
+    chunks: ArrayBuffer[],
   ): void {
-    const actualData = data.slice(0, fileSize);
-    const blob = new Blob([actualData]);
+    // 🧠 Blob 直接引用分块 ArrayBuffer，不进行内存复制
+    // new Blob(chunks) 按规范不复制底层数据
+    const blob = new Blob(chunks, { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement("a");

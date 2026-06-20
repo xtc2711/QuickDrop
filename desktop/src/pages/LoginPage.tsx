@@ -99,7 +99,13 @@ export default function LoginPage() {
           {loading ? "登录中..." : "登录"}
         </button>
 
-        <p style={{ textAlign: "center", marginTop: 16, fontSize: 13, color: "var(--color-text-secondary)" }}>
+        <p style={{ textAlign: "center", marginTop: 8, fontSize: 13, color: "var(--color-text-secondary)" }}>
+          <Link to="/forgot-password" style={{ color: "var(--color-text-secondary)" }}>
+            忘记密码？
+          </Link>
+        </p>
+
+        <p style={{ textAlign: "center", marginTop: 8, fontSize: 13, color: "var(--color-text-secondary)" }}>
           还没有账号？<Link to="/register" style={{ color: "var(--color-primary)" }}>立即注册</Link>
         </p>
       </form>

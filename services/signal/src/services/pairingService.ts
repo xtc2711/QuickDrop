@@ -176,5 +176,6 @@ class PairingService {
   }
 }
 
-// 单例导出
+// 导出类和单例（类导出供测试使用）
+export { PairingService };
 export const pairingService = new PairingService();

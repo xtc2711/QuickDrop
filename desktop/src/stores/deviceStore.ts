@@ -3,7 +3,7 @@
 // ============================================================
 
 import { create } from "zustand";
-import type { DeviceInfo } from "../../../../shared/types/index";
+import type { DeviceInfo } from "../../../shared/types/index";
 
 interface DeviceState {
   myDevices: DeviceInfo[];

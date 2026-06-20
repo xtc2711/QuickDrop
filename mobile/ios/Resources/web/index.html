@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#3B82F6" />
+    <title>QuickDrop</title>
+    <link rel="stylesheet" href="mobile-styles.css" />
+    <style>
+      /* 首屏加载样式 */
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      .splash-screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        height: 100dvh;
+        background: linear-gradient(135deg, #3b82f6, #6366f1);
+        color: white;
+      }
+      .splash-logo {
+        width: 80px;
+        height: 80px;
+        border-radius: 20px;
+        background: white;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+      }
+      .splash-title {
+        font-size: 28px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .splash-subtitle {
+        font-size: 14px;
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 启动画面（WebView 加载前显示） -->
+    <div id="splash" class="splash-screen">
+      <div class="splash-logo">📤</div>
+      <div class="splash-title">QuickDrop</div>
+      <div class="splash-subtitle">跨平台极速文件传输</div>
+    </div>
+
+    <!-- React 挂载点 -->
+    <div id="root" style="display: none"></div>
+
+    <!-- 平台适配器（优先加载） -->
+    <script src="platform-adapter.js"></script>
+
+    <!-- 配置注入（由原生层在加载前注入或由适配器提供） -->
+    <script>
+      window.__QUICKDROP_CONFIG__ = {
+        authBaseUrl:
+          window.QuickDropBridge?.getAuthBaseUrl() ||
+          "http://localhost:3001/api/v1",
+        signalWsUrl:
+          window.QuickDropBridge?.getSignalWsUrl() || "ws://localhost:3002",
+      };
+    </script>
+
+    <!--
+      生产构建：Vite 打包后的 JS/CSS
+      开发时由 MainActivity 加载 localhost:5173
+      以下为生产构建位置占位
+    -->
+    <!-- <script type="module" src="/assets/index.js"></script> -->
+
+    <script>
+      // 隐藏启动画面（React 应用挂载后调用）
+      window.__hideSplash = function () {
+        const splash = document.getElementById("splash");
+        const root = document.getElementById("root");
+        if (splash) splash.style.display = "none";
+        if (root) root.style.display = "block";
+      };
+
+      // 如果 3 秒后仍未隐藏，强制显示 React 挂载点
+      setTimeout(() => {
+        const splash = document.getElementById("splash");
+        if (splash && splash.style.display !== "none") {
+          splash.style.display = "none";
+          const root = document.getElementById("root");
+          if (root) root.style.display = "block";
+        }
+      }, 3000);
+    </script>
+  </body>
+</html>

@@ -2,6 +2,7 @@
 // 认证服务 — 核心业务逻辑: 注册、登录、Token 刷新、退出
 // ============================================================
 
+import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { PrismaClient } from "@prisma/client";
 import type { RegisterInput, LoginInput, ChangePasswordInput } from "../models/schemas.js";
@@ -15,6 +16,7 @@ import {
   hashToken,
 } from "../utils/jwt.js";
 import { addToBlacklist } from "./blacklistService.js";
+import { sendPasswordResetEmail } from "./emailService.js";
 
 const prisma = new PrismaClient();
 const BCRYPT_COST = 12;
@@ -372,6 +374,120 @@ export class AuthService {
     }
 
     return { message: "密码修改成功" };
+  }
+
+  /**
+   * 请求密码重置
+   * 1. 查找用户（无论是否存在都返回成功，防止邮箱枚举攻击）
+   * 2. 生成随机重置令牌（SHA-256 哈希存储）
+   * 3. 保存到数据库（15 分钟过期）
+   * 4. 发送重置邮件
+   */
+  async requestPasswordReset(email: string): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // 即使用户不存在也返回相同消息，防止邮箱枚举
+    if (!user) {
+      return { message: "如果该邮箱已注册，重置邮件已发送" };
+    }
+
+    // 锁定状态检查：被锁定的账户不允许重置密码
+    if (user.isLocked && user.lockedUntil && new Date() < user.lockedUntil) {
+      return { message: "如果该邮箱已注册，重置邮件已发送" };
+    }
+
+    // 清理该用户旧的未使用重置令牌
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, used: false },
+      data: { used: true },
+    });
+
+    // 生成随机令牌（64 字节 → hex 128 字符）
+    const rawToken = crypto.randomBytes(64).toString("hex");
+    const tokenHash = hashToken(rawToken);
+
+    // 保存到数据库（15 分钟过期）
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+
+    // 发送重置邮件（异步，不阻塞响应）
+    sendPasswordResetEmail(email, rawToken).catch((err) => {
+      console.error("发送密码重置邮件失败:", err);
+    });
+
+    return { message: "如果该邮箱已注册，重置邮件已发送" };
+  }
+
+  /**
+   * 重置密码
+   * 1. 查找有效的重置令牌
+   * 2. 验证未过期、未使用
+   * 3. bcrypt 加密新密码
+   * 4. 更新密码
+   * 5. 标记令牌已使用
+   * 6. 撤销所有设备登录（强制重新认证）
+   */
+  async resetPassword(
+    rawToken: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const tokenHash = hashToken(rawToken);
+
+    const resetRecord = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+
+    if (!resetRecord) {
+      throw new AppError(400, "无效的重置令牌");
+    }
+
+    if (resetRecord.used) {
+      throw new AppError(400, "此重置令牌已使用，请重新请求密码重置");
+    }
+
+    if (new Date() > resetRecord.expiresAt) {
+      throw new AppError(400, "重置令牌已过期，请重新请求密码重置");
+    }
+
+    // 加密新密码
+    const newHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+
+    // 更新密码、解锁账户、清除失败计数
+    await prisma.user.update({
+      where: { id: resetRecord.userId },
+      data: {
+        passwordHash: newHash,
+        isLocked: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
+
+    // 标记令牌已使用
+    await prisma.passwordResetToken.update({
+      where: { id: resetRecord.id },
+      data: { used: true },
+    });
+
+    // 撤销所有设备的 Refresh Token（强制重新登录）
+    await prisma.refreshToken.updateMany({
+      where: { userId: resetRecord.userId, revoked: false },
+      data: { revoked: true },
+    });
+
+    // 标记所有设备离线
+    await prisma.device.updateMany({
+      where: { userId: resetRecord.userId },
+      data: { isOnline: false },
+    });
+
+    return { message: "密码重置成功，请使用新密码重新登录" };
   }
 
   /**

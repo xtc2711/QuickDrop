@@ -28,6 +28,13 @@ setInterval(() => {
   }
 }, 60_000);
 
+/**
+ * 重置限流存储（仅用于测试）
+ */
+export function resetRateLimitStore(): void {
+  store.clear();
+}
+
 export function rateLimitMiddleware(options: RateLimitOptions) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const key = `rate_limit:${req.ip}:${req.path}`;

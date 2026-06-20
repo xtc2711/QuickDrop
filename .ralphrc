@@ -23,11 +23,11 @@ CLAUDE_OUTPUT_FORMAT="json"
 # Tool permissions
 # Comma-separated list of allowed tools
 # Safe git subcommands only - broad Bash(git *) allows destructive commands like git clean/git rm (Issue #149)
-ALLOWED_TOOLS="Write,Read,Edit,Bash(git add *),Bash(git commit *),Bash(git diff *),Bash(git log *),Bash(git status),Bash(git status *),Bash(git push *),Bash(git pull *),Bash(git fetch *),Bash(git checkout *),Bash(git branch *),Bash(git stash *),Bash(git merge *),Bash(git tag *),Bash(npm *),Bash(pytest)"
+ALLOWED_TOOLS="Write,Read,Edit,MultiEdit,Glob,Grep,Skill,Bash(*),AskUserQuestion,TaskCreate,TaskUpdate,TaskList,TaskGet,Agent,SendMessage,WebFetch,WebSearch,ExitPlanMode"
 
 # Session management
-SESSION_CONTINUITY=true
-SESSION_EXPIRY_HOURS=24
+SESSION_CONTINUITY=false
+SESSION_EXPIRY_HOURS=4
 
 # Task sources (for ralph enable --sync)
 # Options: local, beads, github (comma-separated for multiple)
@@ -48,3 +48,9 @@ CLAUDE_AUTO_UPDATE=true
 # variables or PATH entries defined in a non-bash shell config (e.g. ~/.zshrc).
 # Leave commented out unless needed.
 #RALPH_SHELL_INIT_FILE="~/.zshrc"
+export ANTHROPIC_AUTH_TOKEN="sk-bc328cf1038e485c879204bda46ddb5d"
+export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+export ANTHROPIC_MODEL="deepseek-v4-pro[1m]"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-v4-pro[1m]"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-v4-pro[1m]"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-v4-flash"

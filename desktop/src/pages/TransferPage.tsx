@@ -7,11 +7,14 @@
 
 import { useState, useCallback, DragEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import type { TransferProgress, TransferStatus } from "../../../../shared/types/index";
+import type { TransferProgress, TransferStatus } from "../../../shared/types/index";
 import { webrtcService } from "../services/webrtc";
 import { wsService } from "../services/websocket";
 import { fileTransferService } from "../services/fileTransfer";
 import type { TransferCallbacks } from "../services/fileTransfer";
+import { useTransferHistoryStore } from "../stores/transferHistoryStore";
+import { useDeviceStore } from "../stores/deviceStore";
+import ConfettiBurst from "../components/ConfettiBurst";
 
 interface FileItem {
   id: string;
@@ -100,10 +103,29 @@ export default function TransferPage() {
   }, []);
 
   /**
+   * 获取目标设备名称
+   */
+  const getTargetDeviceName = useCallback(
+    (targetId?: string): string => {
+      const deviceIdToFind = targetId || deviceId || "";
+      const { myDevices, pairedDevices } = useDeviceStore.getState();
+      const allDevices = [...myDevices, ...pairedDevices];
+      const device = allDevices.find((d) => d.id === deviceIdToFind);
+      return device?.device_name || "未知设备";
+    },
+    [deviceId],
+  );
+
+  /**
    * 处理传输完成
    */
   const handleTransferComplete = useCallback(
-    (fileId: string, fileName: string, success: boolean) => {
+    (
+      fileId: string,
+      fileName: string,
+      success: boolean,
+      fileSize?: number,
+    ) => {
       setFiles((prev) =>
         prev.map((f) => {
           if (
@@ -123,8 +145,25 @@ export default function TransferPage() {
           return f;
         }),
       );
+
+      // 记录传输历史
+      const deviceName = getTargetDeviceName();
+      const matchedFile = files.find((f) => f.file.name === fileName);
+      const recordSize = fileSize || matchedFile?.file.size || 0;
+
+      useTransferHistoryStore.getState().addRecord({
+        id: `${fileId}-${Date.now()}`,
+        fileName,
+        fileSize: recordSize,
+        deviceName,
+        direction: "sent",
+        timestamp: new Date().toISOString(),
+        status: success ? "success" : "failed",
+        sha256Match: success,
+        errorMessage: success ? undefined : "传输失败",
+      });
     },
-    [],
+    [files, getTargetDeviceName],
   );
 
   const startTransfer = async () => {
@@ -486,6 +525,9 @@ export default function TransferPage() {
           </button>
         </div>
       )}
+
+      {/* 传输完成粒子爆发动效 */}
+      <ConfettiBurst trigger={completedCount} />
     </div>
   );
 }

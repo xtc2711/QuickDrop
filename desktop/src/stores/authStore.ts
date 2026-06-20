@@ -3,7 +3,7 @@
 // ============================================================
 
 import { create } from "zustand";
-import type { PublicUser, DeviceInfo, TokenPair } from "../../../../shared/types/index";
+import type { PublicUser, DeviceInfo, TokenPair } from "../../../shared/types/index";
 
 interface AuthState {
   // 状态
@@ -17,7 +17,7 @@ interface AuthState {
   setAuth: (user: PublicUser, device: DeviceInfo, tokens: TokenPair) => void;
   setTokens: (tokens: TokenPair) => void;
   logout: () => void;
-  getAuthHeader: () => { Authorization: string } | Record<string, never>;
+  getAuthHeader: () => { Authorization?: string };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -66,7 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  getAuthHeader: () => {
+  getAuthHeader: (): { Authorization?: string } => {
     const token = get().accessToken;
     return token ? { Authorization: `Bearer ${token}` } : {};
   },

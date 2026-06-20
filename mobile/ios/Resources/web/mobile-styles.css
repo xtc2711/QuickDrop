@@ -1,0 +1,285 @@
+/**
+ * QuickDrop 移动端响应式样式
+ * 在桌面端 Web UI 基础上适配移动端屏幕
+ */
+
+/* ============================================================
+   基础适配
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* 移动端全局字体调整 */
+  body {
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* 输入框适配移动端 */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important; /* 防止 iOS 自动缩放 */
+  }
+
+  /* 按钮最小可点击区域 */
+  button,
+  [role="button"],
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* ============================================================
+   认证页面（登录/注册）
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .auth-container {
+    padding: 24px 16px;
+    max-width: 100%;
+  }
+
+  .auth-form {
+    gap: 16px;
+  }
+
+  .auth-form input {
+    padding: 14px 16px;
+    border-radius: 12px;
+    font-size: 16px;
+  }
+
+  .auth-form button[type="submit"] {
+    padding: 14px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .auth-title {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+
+  .auth-subtitle {
+    font-size: 14px;
+    margin-bottom: 24px;
+  }
+}
+
+/* ============================================================
+   设备列表
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .device-list {
+    padding: 0;
+  }
+
+  .device-card {
+    margin: 8px 16px;
+    padding: 16px;
+    border-radius: 16px;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .device-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    margin-right: 12px;
+  }
+
+  .device-card-name {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .device-card-meta {
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  /* 在线状态指示器 */
+  .online-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+
+  .offline-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #9ca3af;
+  }
+
+  /* 设备分区标题 */
+  .section-header {
+    padding: 16px 16px 8px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #64748b;
+  }
+}
+
+/* ============================================================
+   文件传输页面
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .transfer-page {
+    padding: 16px;
+  }
+
+  /* 投放区域 */
+  .drop-zone {
+    margin: 16px;
+    padding: 32px 16px;
+    border: 2px dashed #93c5fd;
+    border-radius: 16px;
+    text-align: center;
+    min-height: 120px;
+  }
+
+  .drop-zone.active {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  /* 传输进度卡片 */
+  .transfer-card {
+    margin: 8px 16px;
+    padding: 16px;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  .transfer-card-filename {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .transfer-card-progress {
+    height: 6px;
+    border-radius: 3px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  .transfer-card-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #3b82f6, #6366f1);
+    transition: width 0.3s ease;
+  }
+
+  .transfer-card-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  /* 传输完成动效占位 */
+  .transfer-complete-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: #dcfce7;
+    color: #15803d;
+    font-size: 12px;
+    font-weight: 600;
+  }
+}
+
+/* ============================================================
+   配对码输入（6 位数字）
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .pairing-code-input {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin: 24px 0;
+  }
+
+  .pairing-code-digit {
+    width: 48px;
+    height: 56px;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    caret-color: #3b82f6;
+  }
+
+  .pairing-code-digit:focus {
+    border-color: #3b82f6;
+    outline: none;
+  }
+
+  .pairing-code-digit.filled {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+}
+
+/* ============================================================
+   连接通道指示
+   ============================================================ */
+
+@media (max-width: 768px) {
+  .channel-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .channel-indicator.bluetooth {
+    background: #eff6ff;
+    color: #3b82f6;
+  }
+
+  .channel-indicator.lan {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .channel-indicator.relay {
+    background: #fef3c7;
+    color: #d97706;
+  }
+}
+
+/* ============================================================
+   iOS Safe Area
+   ============================================================ */
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}

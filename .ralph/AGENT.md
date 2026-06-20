@@ -103,6 +103,44 @@ cd services/auth && npx tsc --noEmit
 cd services/signal && npx tsc --noEmit
 ```
 
+## 移动端项目
+
+### Android (mobile/android/)
+- Kotlin + WebView 架构，打开 Android Studio 即可构建
+- 使用 Gradle 构建
+
+### iOS (mobile/ios/)
+- Swift + WKWebView 架构
+- 需要完整 Xcode（非仅 Command Line Tools）才能编译
+- 使用 XcodeGen 通过 `project.yml` 生成 `.xcodeproj`
+- 扫码使用 Core Image CIDetector（无需 ML Kit）
+- Token 存储使用 Keychain Services
+
+## 安全配置
+
+### 环境变量（生产环境必需）
+```bash
+NODE_ENV=production          # 启用 HTTPS 强制 + HSTS + 安全头部
+JWT_ACCESS_SECRET=<random>   # JWT 签名密钥（禁止使用默认值）
+JWT_REFRESH_SECRET=<random>  # Refresh Token 密钥
+JWT_ACCESS_EXPIRES_IN=15m    # Access Token 有效期（默认 15 分钟）
+JWT_REFRESH_EXPIRES_IN=30d   # Refresh Token 有效期（默认 30 天）
+REDIS_URL=redis://...        # Redis 连接（可选，不配置则降级为内存存储）
+```
+
+### 安全中间件（自动启用）
+- `securityHeaders`: CSP、XSS 防护、点击劫持防护、MIME 嗅探防护
+- `hsts`: 生产环境自动设置 HSTS (max-age=31536000; includeSubDomains; preload)
+- `httpsRedirect`: 生产环境根据 X-Forwarded-Proto 头自动重定向 HTTP → HTTPS
+- `trust proxy`: 生产环境自动启用，确保速率限制获取真实客户端 IP
+
+### 速率限制
+| 接口 | 限制 |
+|---|---|
+| POST /api/v1/auth/login | 单 IP 每分钟 10 次 |
+| POST /api/v1/auth/register | 单 IP 每小时 5 次 |
+| 超限响应 | 429 + retry_after 秒数 |
+
 ## Key Learnings
 - 项目采用 monorepo 结构，shared/ 目录被 auth、signal、desktop 三个包共享
 - Prisma 用于 PostgreSQL ORM，生成客户端后 tsc 才能通过
