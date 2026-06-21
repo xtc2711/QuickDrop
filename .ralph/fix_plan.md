@@ -73,7 +73,7 @@
 - [x] Tauri 桌面端原生打包（配置完成：macOS .dmg / Windows .msi / Linux .deb，需 Rust 工具链实际构建）
 - [ ] 移动端原生打包（Android APK / iOS IPA）
 - [x] STUN/TURN 服务器部署（coturn 配置：turnserver.conf + docker-compose.yml + 部署文档）
-- [ ] 信令服务器生产环境部署
+- [x] 信令服务器生产环境部署
 - [x] CI/CD 流水线搭建（GitHub Actions: ci.yml 测试+类型检查，build.yml 桌面端三平台构建）
 
 ### 第 10 周: 运维能力

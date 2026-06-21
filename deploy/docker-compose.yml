@@ -1,0 +1,242 @@
+# ============================================================
+# QuickDrop 生产环境 — Docker Compose 全栈部署
+# ============================================================
+# 使用方式:
+#   1. cp deploy/.env.example deploy/.env 并填入实际值
+#   2. docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
+#   3. 首次运行后执行数据库迁移:
+#      docker compose -f deploy/docker-compose.yml exec auth npx prisma migrate deploy
+# ============================================================
+
+version: "3.9"
+
+services:
+  # ==========================================
+  # PostgreSQL 数据库
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: quickdrop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quickdrop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-quickdrop}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432" # 仅本地访问
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quickdrop} -d ${POSTGRES_DB:-quickdrop}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ==========================================
+  # Redis 缓存
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: quickdrop-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379" # 仅本地访问
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "30m"
+        max-file: "3"
+
+  # ==========================================
+  # 认证服务
+  # ==========================================
+  auth:
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    container_name: quickdrop-auth
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?必须设置 JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?必须设置 JWT_REFRESH_SECRET}
+      JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-QuickDrop <noreply@quickdrop.app>}
+      APP_BASE_URL: ${APP_BASE_URL:-https://quickdrop.app}
+      SIGNAL_SERVICE_URL: ${SIGNAL_SERVICE_URL:-http://signal:3002}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ==========================================
+  # 信令服务
+  # ==========================================
+  signal:
+    build:
+      context: ..
+      dockerfile: services/signal/Dockerfile
+    container_name: quickdrop-signal
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3002"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?必须设置 JWT_ACCESS_SECRET}
+      HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-15000}
+      HEARTBEAT_TIMEOUT_MS: ${HEARTBEAT_TIMEOUT_MS:-30000}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ==========================================
+  # TURN/STUN 服务器 (coturn)
+  # ==========================================
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: quickdrop-coturn
+    restart: unless-stopped
+    command: >
+      turnserver
+      -c /etc/coturn/turnserver.conf
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478"     # STUN/TURN (UDP)
+      - "3478:3478/udp"
+      - "5349:5349"     # STUN/TURN (TLS)
+      - "5349:5349/udp"
+      - "49152-65535:49152-65535/udp"  # TURN 中继端口范围
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "30m"
+        max-file: "3"
+
+  # ==========================================
+  # Nginx 反向代理
+  # ==========================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: quickdrop-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_data:/var/www/certbot:ro
+      - letsencrypt_data:/etc/letsencrypt:ro
+      - web_static:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - auth
+      - signal
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ==========================================
+  # Certbot（Let's Encrypt 自动续期）
+  # ==========================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: quickdrop-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot_data:/var/www/certbot
+      - letsencrypt_data:/etc/letsencrypt
+    entrypoint: |
+      /bin/sh -c '
+      trap exit TERM;
+      while :; do
+        certbot renew --quiet --webroot --webroot-path=/var/www/certbot;
+        sleep 12h;
+      done'
+    networks:
+      - quickdrop
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+# ==========================================
+# 持久化卷
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  certbot_data:
+    driver: local
+  letsencrypt_data:
+    driver: local
+  web_static:
+    driver: local
+
+# ==========================================
+# 内部网络
+# ==========================================
+networks:
+  quickdrop:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
