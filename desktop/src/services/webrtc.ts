@@ -13,6 +13,7 @@
 // ============================================================
 
 import type { ConnectionChannel } from "../../../shared/types/index";
+import { fileTransferService } from "./fileTransfer.js";
 
 // ---- 可配置 ICE 服务器列表 ----
 // 生产环境通过环境变量 VITE_QD_STUN_SERVERS / VITE_QD_TURN_SERVERS 配置
@@ -766,6 +767,8 @@ class WebRTCService {
       }
       this.updateState(deviceId, "connected");
       this.onDataChannelReady?.(deviceId, dc);
+      // 通知文件传输引擎检查续传
+      fileTransferService.onDataChannelReady(deviceId, dc);
       // 减少活跃连接计数，处理队列
       this.activeConnectionAttempts = Math.max(
         0,
@@ -776,6 +779,9 @@ class WebRTCService {
 
     dc.onclose = () => {
       console.log(`📡 DataChannel to ${deviceId} closed`);
+      // 通知文件传输引擎保存中断状态
+      fileTransferService.onDataChannelClose(dc);
+      this.updateState(deviceId, "disconnected");
     };
 
     dc.onerror = (err) => {

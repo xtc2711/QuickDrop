@@ -22,6 +22,8 @@ import type {
   FileAckMessage,
   FileCompleteMessage,
   FileVerifyMessage,
+  FileResumeRequestMessage,
+  FileResumeAckMessage,
   FileControlMessage,
   TransferProgress,
   TransferResult,
@@ -59,6 +61,10 @@ interface ActiveTransfer {
   pendingAcks: Set<number>;
   /** ACK resolver（唤醒发送循环） */
   ackResolver: (() => void) | null;
+  /** 完整文件 SHA256（首次发送完成后缓存，供断线续传使用） */
+  sha256Hash?: string;
+  /** 断线续传：从该分块开始发送（跳过 [0..resumeFromChunk-1]） */
+  resumeFromChunk: number;
 }
 
 interface ReceiveState {
@@ -169,17 +175,26 @@ class FileTransferService {
     TransferCallbacks
   >();
 
+  /** 断线续传 — 中断的接收任务（fileId → ReceiveState） */
+  private interruptedReceives = new Map<string, ReceiveState>();
+
+  /** 断线续传 — DataChannel → deviceId 映射 */
+  private dcToDeviceId = new WeakMap<RTCDataChannel, string>();
+
   // ============================================================
   // 公共 API — 发送文件
   // ============================================================
 
   sendFile(
-    _deviceId: string,
+    deviceId: string,
     file: File,
     dc: RTCDataChannel,
     callbacks: TransferCallbacks,
   ): () => void {
     const fileId = crypto.randomUUID();
+
+    // 记录 dc → deviceId 映射（用于断线续传）
+    this.dcToDeviceId.set(dc, deviceId);
 
     const transfer: ActiveTransfer = {
       fileId,
@@ -190,6 +205,7 @@ class FileTransferService {
       cancelled: false,
       pendingAcks: new Set(),
       ackResolver: null,
+      resumeFromChunk: 0,
     };
 
     // 确保已注册消息处理器（用于接收 ACK / VERIFY）
@@ -316,6 +332,14 @@ class FileTransferService {
         this.handleComplete(dc, msg);
         break;
 
+      case "resume_request":
+        this.handleResumeRequest(msg, dc);
+        break;
+
+      case "resume_ack":
+        this.handleResumeAck(msg);
+        break;
+
       default:
         console.debug("Unknown control message:", msg);
     }
@@ -369,6 +393,8 @@ class FileTransferService {
         console.warn(
           `SHA256 mismatch for ${msg.fileId}, retry ${transfer.retryCount}/${MAX_RETRY_COUNT}`,
         );
+        // 重置续传起点（SHA256 不匹配需要完整重传）
+        transfer.resumeFromChunk = 0;
         this.startSend(transfer);
       } else {
         transfer.callbacks.onComplete({
@@ -420,24 +446,17 @@ class FileTransferService {
     const { fileId, file, dc, callbacks } = transfer;
     const fileSize = file.size;
     const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+    const resumeFrom = transfer.resumeFromChunk;
+    const isResuming = resumeFrom > 0;
 
-    logMemoryUsage(`发送开始: ${file.name} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`);
+    logMemoryUsage(
+      `${isResuming ? "断线续传" : "发送开始"}: ${file.name} (${(fileSize / 1024 / 1024).toFixed(1)}MB)${isResuming ? `, 从分块 ${resumeFrom}/${totalChunks} 继续` : ""}`,
+    );
 
-    callbacks.onProgress({
-      file_id: fileId,
-      file_name: file.name,
-      total_bytes: fileSize,
-      transferred_bytes: 0,
-      percentage: 0,
-      speed_bps: 0,
-      eta_seconds: 0,
-      status: "connecting",
-    });
+    // 增量 SHA256 — 边读边哈希
+    const sha256Hasher = transfer.sha256Hash ? null : new IncrementalSHA256();
 
-    // 增量 SHA256 — 边读边哈希，无需整个文件载入内存
-    const sha256Hasher = new IncrementalSHA256();
-
-    // 发送 FILE_META
+    // 重新发送 FILE_META（续传时接收端需要知道这是哪个文件的续传）
     const metaMsg: FileMetaMessage = {
       type: "meta",
       fileId,
@@ -453,8 +472,8 @@ class FileTransferService {
       file_id: fileId,
       file_name: file.name,
       total_bytes: fileSize,
-      transferred_bytes: 0,
-      percentage: 0,
+      transferred_bytes: isResuming ? resumeFrom * CHUNK_SIZE : 0,
+      percentage: isResuming ? Math.round((resumeFrom / totalChunks) * 100) : 0,
       speed_bps: 0,
       eta_seconds: 0,
       status: "transferring",
@@ -462,71 +481,78 @@ class FileTransferService {
 
     const startTime = performance.now();
     let lastProgressTime = startTime;
-    let sentBytes = 0;
+    let sentBytes = isResuming ? resumeFrom * CHUNK_SIZE : 0;
+    let readBytes = 0; // 已读取的分块数（包括跳过的）
     transfer.pendingAcks = new Set();
 
-    let nextChunkToSend = 0;
+    while (readBytes < totalChunks && !transfer.cancelled) {
+      // 流控和窗口控制（仅在发送阶段检查）
+      if (readBytes >= resumeFrom) {
+        while (
+          dc.bufferedAmount > BUFFERED_AMOUNT_THRESHOLD &&
+          !transfer.cancelled
+        ) {
+          await this.waitForBufferDrain(dc);
+        }
 
-    while (nextChunkToSend < totalChunks && !transfer.cancelled) {
-      // 流控：检查 DataChannel 缓冲区
-      while (
-        dc.bufferedAmount > BUFFERED_AMOUNT_THRESHOLD &&
-        !transfer.cancelled
-      ) {
-        await this.waitForBufferDrain(dc);
-      }
-
-      // 窗口控制：等待 ACK
-      while (
-        transfer.pendingAcks.size >= FLOW_CONTROL_WINDOW &&
-        !transfer.cancelled
-      ) {
-        await new Promise<void>((resolve) => {
-          transfer.ackResolver = resolve;
-        });
-        if (transfer.cancelled) break;
+        while (
+          transfer.pendingAcks.size >= FLOW_CONTROL_WINDOW &&
+          !transfer.cancelled
+        ) {
+          await new Promise<void>((resolve) => {
+            transfer.ackResolver = resolve;
+          });
+          if (transfer.cancelled) break;
+        }
       }
 
       if (transfer.cancelled) break;
 
       // 🧠 流式读取：每次只读取一个 16KB 分块到内存
-      const chunkStart = nextChunkToSend * CHUNK_SIZE;
+      const chunkStart = readBytes * CHUNK_SIZE;
       const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, fileSize);
       const chunkBlob = file.slice(chunkStart, chunkEnd);
       const chunkData = await chunkBlob.arrayBuffer();
 
-      // 增量哈希更新
-      sha256Hasher.update(chunkData);
-
-      const chunkCrc32 = crc32(chunkData);
-      const binaryMsg = encodeChunk(fileId, nextChunkToSend, chunkCrc32, chunkData);
-
-      dc.send(binaryMsg);
-      transfer.pendingAcks.add(nextChunkToSend);
-      sentBytes += chunkData.byteLength;
-      nextChunkToSend++;
-
-      // 进度回调（每 100ms 或每 64 个分块）
-      const now = performance.now();
-      if (now - lastProgressTime > 100 || nextChunkToSend % 64 === 0) {
-        const elapsed = (now - startTime) / 1000;
-        const speedBps = elapsed > 0 ? sentBytes / elapsed : 0;
-        const remainingBytes = fileSize - sentBytes;
-        const etaSeconds = speedBps > 0 ? remainingBytes / speedBps : 0;
-
-        callbacks.onProgress({
-          file_id: fileId,
-          file_name: file.name,
-          total_bytes: fileSize,
-          transferred_bytes: sentBytes,
-          percentage: Math.round((sentBytes / fileSize) * 100),
-          speed_bps: Math.round(speedBps),
-          eta_seconds: Math.round(etaSeconds),
-          status: "transferring",
-        });
-
-        lastProgressTime = now;
+      // 增量哈希更新（仅在首次发送或没有缓存 SHA256 时需要）
+      if (sha256Hasher) {
+        sha256Hasher.update(chunkData);
       }
+
+      // 续传时跳过已发送的分块（但仍需读取以计算 SHA256）
+      if (readBytes >= resumeFrom) {
+        const chunkCrc32 = crc32(chunkData);
+        const binaryMsg = encodeChunk(fileId, readBytes, chunkCrc32, chunkData);
+
+        dc.send(binaryMsg);
+        transfer.pendingAcks.add(readBytes);
+        sentBytes += chunkData.byteLength;
+
+        // 进度回调（每 100ms 或每 64 个分块）
+        const now = performance.now();
+        if (now - lastProgressTime > 100 || readBytes % 64 === 0) {
+          const elapsed = (now - startTime) / 1000;
+          const actualSentBytes = sentBytes - resumeFrom * CHUNK_SIZE;
+          const speedBps = elapsed > 0 ? actualSentBytes / elapsed : 0;
+          const remainingBytes = fileSize - sentBytes;
+          const etaSeconds = speedBps > 0 ? remainingBytes / speedBps : 0;
+
+          callbacks.onProgress({
+            file_id: fileId,
+            file_name: file.name,
+            total_bytes: fileSize,
+            transferred_bytes: sentBytes,
+            percentage: Math.round((sentBytes / fileSize) * 100),
+            speed_bps: Math.round(speedBps),
+            eta_seconds: Math.round(etaSeconds),
+            status: "transferring",
+          });
+
+          lastProgressTime = now;
+        }
+      }
+
+      readBytes++;
     }
 
     // 等待未完成的 ACK
@@ -538,8 +564,11 @@ class FileTransferService {
 
     if (transfer.cancelled) return;
 
-    // 获取最终的 SHA256 哈希
-    const sha256Hash = sha256Hasher.digest();
+    // 获取最终的 SHA256 哈希（并缓存供后续续传使用）
+    const sha256Hash = sha256Hasher
+      ? sha256Hasher.digest()
+      : transfer.sha256Hash!;
+    transfer.sha256Hash = sha256Hash;
 
     // 发送 FILE_COMPLETE
     const completeMsg: FileCompleteMessage = {
@@ -583,6 +612,19 @@ class FileTransferService {
   private handleMeta(dc: RTCDataChannel, msg: FileMetaMessage): void {
     const callbacks = this.receiveCallbacks.get(dc);
     if (!callbacks) return;
+
+    // 断线续传：如果已有活跃接收（从 interruptedReceives 恢复的），则合并状态
+    const existingState = this.activeReceives.get(msg.fileId);
+
+    if (existingState && existingState.chunks.length > 0) {
+      // 续传场景：保留已接收的分块和 SHA256 状态，仅更新 dc 和回调
+      logMemoryUsage(
+        `续传继续: ${msg.fileName}, 已有 ${existingState.receivedChunks}/${msg.totalChunks} 分块`,
+      );
+      existingState.dc = dc;
+      existingState.callbacks = callbacks;
+      return; // 不创建新状态，等待后续分块
+    }
 
     logMemoryUsage(`接收开始: ${msg.fileName} (${(msg.fileSize / 1024 / 1024).toFixed(1)}MB)`);
 
@@ -803,6 +845,166 @@ class FileTransferService {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  // ============================================================
+  // 断线续传 — DataChannel 生命周期
+  // ============================================================
+
+  /**
+   * DataChannel 关闭时调用（由 webrtc service 触发）
+   * 保存中断的接收任务状态，以便后续续传
+   */
+  onDataChannelClose(dc: RTCDataChannel): void {
+    // 保存中断的接收任务
+    for (const [fileId, state] of this.activeReceives) {
+      if (state.dc === dc) {
+        console.log(
+          `⏸️  传输中断: ${state.fileName}, 已接收 ${state.receivedChunks}/${state.totalChunks} 分块`,
+        );
+        this.interruptedReceives.set(fileId, state);
+        this.activeReceives.delete(fileId);
+      }
+    }
+
+    // 标记中断的发送任务（保留在 activeSends 中以供续传）
+    for (const [, transfer] of this.activeSends) {
+      if (transfer.dc === dc) {
+        console.log(
+          `⏸️  发送中断: ${transfer.file.name}, fileId=${transfer.fileId}`,
+        );
+        // 不清除 activeSends，等待接收端请求续传
+      }
+    }
+  }
+
+  /**
+   * 新 DataChannel 就绪时调用（由 webrtc service 触发）
+   * 检查是否有中断的传输可以续传
+   */
+  onDataChannelReady(deviceId: string, dc: RTCDataChannel): void {
+    this.dcToDeviceId.set(dc, deviceId);
+
+    // 检查是否有针对该设备的中断接收任务
+    if (this.interruptedReceives.size > 0) {
+      for (const [fileId, state] of this.interruptedReceives) {
+        console.log(
+          `🔄 请求续传: ${state.fileName}, 从分块 ${state.receivedChunks}/${state.totalChunks}`,
+        );
+
+        // 发送续传请求
+        const resumeMsg: FileResumeRequestMessage = {
+          type: "resume_request",
+          fileId,
+          lastReceivedChunk: state.receivedChunks - 1,
+        };
+
+        // 更新接收状态的 dc 引用
+        state.dc = dc;
+        state.callbacks = this.receiveCallbacks.get(dc) || state.callbacks;
+        this.activeReceives.set(fileId, state);
+        this.interruptedReceives.delete(fileId);
+
+        // 重新注册消息处理器
+        this.ensureHandlerRegistered(dc, state.callbacks);
+
+        // 发送续传请求
+        if (dc.readyState === "open") {
+          dc.send(JSON.stringify(resumeMsg));
+        } else {
+          // DataChannel 还没完全打开，等待 open 事件
+          const originalOnOpen = dc.onopen;
+          dc.onopen = (ev) => {
+            if (originalOnOpen) originalOnOpen.call(dc, ev);
+            dc.send(JSON.stringify(resumeMsg));
+          };
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // 断线续传 — 消息处理
+  // ============================================================
+
+  /**
+   * 发送端收到续传请求 → 从指定分块恢复发送
+   */
+  private handleResumeRequest(
+    msg: FileResumeRequestMessage,
+    dc: RTCDataChannel,
+  ): void {
+    const transfer = this.activeSends.get(msg.fileId);
+    if (!transfer) {
+      // 发送端已经清理了该传输（可能已完成或已被用户取消）
+      const rejectMsg: FileResumeAckMessage = {
+        type: "resume_ack",
+        fileId: msg.fileId,
+        resumeFromChunk: 0,
+        accepted: false,
+      };
+      if (dc.readyState === "open") dc.send(JSON.stringify(rejectMsg));
+      return;
+    }
+
+    const resumeFrom = msg.lastReceivedChunk + 1;
+
+    console.log(
+      `🔄 发送端收到续传请求: ${transfer.file.name}, 从分块 ${resumeFrom} 恢复`,
+    );
+
+    // 设置续传起点，重新开始发送
+    transfer.resumeFromChunk = resumeFrom;
+    transfer.dc = dc;
+    transfer.pendingAcks = new Set();
+    transfer.ackResolver = null;
+
+    // 发送确认
+    const ackMsg: FileResumeAckMessage = {
+      type: "resume_ack",
+      fileId: msg.fileId,
+      resumeFromChunk: resumeFrom,
+      accepted: true,
+    };
+    dc.send(JSON.stringify(ackMsg));
+
+    // 重新开始发送（从续传点）
+    this.startSend(transfer);
+  }
+
+  /**
+   * 接收端收到续传确认 → 准备接收剩余分块
+   */
+  private handleResumeAck(msg: FileResumeAckMessage): void {
+    const state = this.activeReceives.get(msg.fileId);
+    if (!state) {
+      console.warn(`收到未知文件的续传确认: ${msg.fileId}`);
+      return;
+    }
+
+    if (!msg.accepted) {
+      // 发送端拒绝续传 → 标记为失败
+      state.callbacks.onError(
+        msg.fileId,
+        "发送端无法续传，请手动重新传输",
+      );
+      state.callbacks.onComplete({
+        file_id: msg.fileId,
+        file_name: state.fileName,
+        success: false,
+        sha256_match: false,
+        retry_count: 0,
+        error_message: "续传被拒绝",
+      });
+      this.activeReceives.delete(msg.fileId);
+      return;
+    }
+
+    console.log(
+      `🔄 接收端续传确认: ${state.fileName}, 从分块 ${msg.resumeFromChunk} 继续`,
+    );
+    // 接收端不需要特殊操作，handleMeta 会设置新的 ReceiveState
+    // chunks 数组已保留，handleChunkMessage 会继续追加
   }
 
   private processQueue(): void {

@@ -227,12 +227,31 @@ export interface FileVerifyMessage {
   match: boolean;
 }
 
+/** 断线续传 — 接收端请求从指定分块恢复传输 */
+export interface FileResumeRequestMessage {
+  type: "resume_request";
+  fileId: string;
+  /** 接收端最后收到的分块索引（即已收到 [0..lastReceivedChunk]） */
+  lastReceivedChunk: number;
+}
+
+/** 断线续传 — 发送端确认恢复传输 */
+export interface FileResumeAckMessage {
+  type: "resume_ack";
+  fileId: string;
+  /** 发送端将从该分块开始重传 */
+  resumeFromChunk: number;
+  accepted: boolean;
+}
+
 /** 所有 DataChannel 控制消息的联合类型 */
 export type FileControlMessage =
   | FileMetaMessage
   | FileAckMessage
   | FileCompleteMessage
-  | FileVerifyMessage;
+  | FileVerifyMessage
+  | FileResumeRequestMessage
+  | FileResumeAckMessage;
 
 /** 二进制分块消息的头部结构（接收端解析用） */
 export interface ChunkHeader {
