@@ -8,6 +8,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { authRouter } from "./routes/auth.js";
 import { deviceRouter } from "./routes/device.js";
+import { adminRouter } from "./routes/admin.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import {
   httpsRedirect,
@@ -42,6 +43,7 @@ app.get("/health", (_req, res) => {
 // ---------- 路由 ----------
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/devices", deviceRouter);
+app.use("/api/v1/admin", adminRouter);
 
 // ---------- 错误处理 ----------
 app.use(errorHandler);

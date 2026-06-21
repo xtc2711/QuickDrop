@@ -1,0 +1,67 @@
+# ============================================================
+# QuickDrop — coturn STUN/TURN Docker Compose
+# 快速部署 coturn 服务器用于 NAT 穿透
+# ============================================================
+# 使用方式：
+#   1. 设置环境变量（或创建 .env 文件）
+#   2. docker compose up -d
+# ============================================================
+
+version: "3.8"
+
+services:
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: quickdrop-turn
+    restart: unless-stopped
+
+    # 网络模式：host 模式避免 Docker NAT 干扰 STUN/TURN 端口映射
+    # 如果使用 bridge 模式，需手动映射大范围端口（性能较差）
+    network_mode: host
+
+    environment:
+      # ---- 必需配置 ----
+      # 服务器公网 IP（替换为实际 IP）
+      - EXTERNAL_IP=${QD_TURN_EXTERNAL_IP:-}
+      # 共享密钥（openssl rand -hex 32 生成）
+      - STATIC_AUTH_SECRET=${QD_TURN_AUTH_SECRET:-}
+      # Realm
+      - REALM=${QD_TURN_REALM:-quickdrop.app}
+
+      # ---- 可选配置 ----
+      # TLS 证书路径（使用 Let's Encrypt 时自动发现）
+      # 如果提供了证书文件，coturn 会自动启用 TLS/DTLS
+      - TLS_CERT_FILE=${QD_TURN_TLS_CERT:-}
+      - TLS_KEY_FILE=${QD_TURN_TLS_KEY:-}
+
+      # 最大会话数
+      - MAX_SESSIONS=${QD_TURN_MAX_SESSIONS:-500}
+      # 每个用户最大并发中继
+      - USER_QUOTA=${QD_TURN_USER_QUOTA:-10}
+
+    # 如果不用 host 网络（例如在 macOS），使用 bridge 并映射端口
+    # ports:
+    #   - "3478:3478/udp"
+    #   - "3478:3478/tcp"
+    #   - "5349:5349/tcp"
+    #   - "49152-65535:49152-65535/udp"
+
+    # 挂载自定义配置文件（替代环境变量）
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # 如果使用 Let's Encrypt 证书：
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "turnutils_uclient", "-v", "-p", "3478", "-W", "static-auth-secret=${QD_TURN_AUTH_SECRET:-}", "-u", "health:check", "127.0.0.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

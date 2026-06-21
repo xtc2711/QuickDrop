@@ -22,6 +22,7 @@ export interface JwtPayload {
   jti: string; // token unique id
   iat: number;
   exp: number;
+  is_admin?: boolean; // 由 admin 中间件附加
 }
 
 /**

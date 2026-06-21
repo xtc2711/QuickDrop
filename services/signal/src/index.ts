@@ -28,6 +28,22 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  // GET /stats — 连接监控统计（供管理后台使用）
+  if (req.method === "GET" && url.pathname === "/stats") {
+    const onlineDeviceCount = deviceManager.onlineCount;
+    const userDevices = deviceManager.getStatsByUser?.() ?? { total_users: 0, devices_per_user: {} };
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        online_devices: onlineDeviceCount,
+        unique_users: Object.keys(userDevices.devices_per_user || {}).length,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    return;
+  }
+
   // POST /force-logout — 接收来自认证服务的强制下线请求
   if (req.method === "POST" && url.pathname === "/force-logout") {
     let body = "";

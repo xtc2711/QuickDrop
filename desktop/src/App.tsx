@@ -8,6 +8,7 @@ import DeviceListPage from "./pages/DeviceListPage";
 import TransferPage from "./pages/TransferPage";
 import TransferHistoryPage from "./pages/TransferHistoryPage";
 import SettingsPage from "./pages/SettingsPage";
+import AdminPage from "./pages/AdminPage";
 
 function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -33,6 +34,10 @@ function App() {
       <Route
         path="/settings"
         element={isAuthenticated ? <SettingsPage /> : <Navigate to="/login" />}
+      />
+      <Route
+        path="/admin"
+        element={isAuthenticated ? <AdminPage /> : <Navigate to="/login" />}
       />
       <Route path="*" element={<Navigate to={isAuthenticated ? "/devices" : "/login"} />} />
     </Routes>

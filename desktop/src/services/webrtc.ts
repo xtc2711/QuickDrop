@@ -8,31 +8,71 @@
 //   - ICE 连接超时 30 秒（spec §5.5）
 //   - 最多 3 个并发连接尝试，超出排队
 //   - 连接失败后指数退避重试（最多 3 次）
-//   - 支持自建 STUN/TURN 服务器配置
+//   - 支持自建 STUN/TURN 服务器配置（环境变量注入）
+//   - iceCandidatePoolSize=2 并行收集候选，加速连接建立
 // ============================================================
 
 import type { ConnectionChannel } from "../../../shared/types/index";
 
 // ---- 可配置 ICE 服务器列表 ----
-// 生产环境应替换为自建 STUN/TURN 服务器地址
-const DEFAULT_ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    // 自建服务器示例（部署后取消注释）：
-    // { urls: "stun:stun.quickdrop.app:3478" },
-    // {
-    //   urls: "turn:turn.quickdrop.app:3478?transport=udp",
-    //   username: "quickdrop",
-    //   credential: "<your-secret>",
-    // },
-    // {
-    //   urls: "turn:turn.quickdrop.app:3478?transport=tcp",
-    //   username: "quickdrop",
-    //   credential: "<your-secret>",
-    // },
-  ],
-};
+// 生产环境通过环境变量 VITE_QD_STUN_SERVERS / VITE_QD_TURN_SERVERS 配置
+// STUN 格式：逗号分隔的 URL（如 "stun:stun.example.com:3478,stun:stun2.example.com:3478"）
+// TURN 格式：逗号分隔的 "url|username|credential" 三元组
+
+function parseIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [];
+
+  // --- STUN 服务器 ---
+  const stunEnv = import.meta.env.VITE_QD_STUN_SERVERS;
+  if (stunEnv) {
+    for (const url of stunEnv.split(",").map((s: string) => s.trim()).filter(Boolean)) {
+      servers.push({ urls: url });
+    }
+  } else {
+    // 默认：5 个 Google 公共 STUN 服务器，提高不同网络环境下的候选收集成功率
+    servers.push(
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      { urls: "stun:stun2.l.google.com:19302" },
+      { urls: "stun:stun3.l.google.com:19302" },
+      { urls: "stun:stun4.l.google.com:19302" },
+    );
+  }
+
+  // --- TURN 服务器 ---
+  const turnEnv = import.meta.env.VITE_QD_TURN_SERVERS;
+  if (turnEnv) {
+    for (const entry of turnEnv.split(",").map((s: string) => s.trim()).filter(Boolean)) {
+      const [url, username, credential] = entry.split("|");
+      if (url && username && credential) {
+        servers.push({ urls: url, username, credential });
+      }
+    }
+  }
+
+  return servers;
+}
+
+function buildIceConfig(): RTCConfiguration {
+  const iceServers = parseIceServers();
+  const config: RTCConfiguration = {
+    iceServers,
+    // 并行收集 ICE 候选，减少候选收集延迟
+    // 设为 2 使浏览器并行进行 STUN 查询，而非串行逐个尝试
+    iceCandidatePoolSize: 2,
+  };
+
+  // 可通过环境变量强制使用 TURN 中继（仅用于测试/调试中继通道）
+  const transportPolicy = import.meta.env.VITE_QD_ICE_TRANSPORT_POLICY;
+  if (transportPolicy === "relay") {
+    config.iceTransportPolicy = "relay";
+  }
+
+  return config;
+}
+
+/** 冻结的默认 ICE 配置 */
+const DEFAULT_ICE_CONFIG: RTCConfiguration = buildIceConfig();
 
 // ---- 连接控制参数 ----
 
@@ -123,7 +163,7 @@ class WebRTCService {
    * 获取当前使用的 ICE 服务器配置
    */
   getIceConfig(): RTCConfiguration {
-    return DEFAULT_ICE_SERVERS;
+    return DEFAULT_ICE_CONFIG;
   }
 
   /**
@@ -415,7 +455,7 @@ class WebRTCService {
     sendSignaling: SignalingSender,
     retryCount: number,
   ): Promise<void> {
-    const pc = new RTCPeerConnection(DEFAULT_ICE_SERVERS);
+    const pc = new RTCPeerConnection(DEFAULT_ICE_CONFIG);
     const dc = pc.createDataChannel(DC_LABEL, {
       ordered: true,
     });
@@ -500,7 +540,7 @@ class WebRTCService {
     sendSignaling: SignalingSender,
     retryCount: number,
   ): Promise<void> {
-    const pc = new RTCPeerConnection(DEFAULT_ICE_SERVERS);
+    const pc = new RTCPeerConnection(DEFAULT_ICE_CONFIG);
 
     // 等待发起方的 DataChannel
     pc.ondatachannel = (event) => {

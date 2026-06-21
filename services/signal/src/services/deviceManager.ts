@@ -178,6 +178,18 @@ class DeviceManager {
   get onlineCount(): number {
     return this.devices.size;
   }
+
+  /**
+   * 获取按用户分组的在线设备统计
+   * 供管理后台和监控使用
+   */
+  getStatsByUser(): { total_users: number; devices_per_user: Record<string, number> } {
+    const perUser: Record<string, number> = {};
+    for (const [userId, deviceSet] of this.userDevices) {
+      perUser[userId] = deviceSet.size;
+    }
+    return { total_users: this.userDevices.size, devices_per_user: perUser };
+  }
 }
 
 // 导出类和单例（类导出供测试使用）

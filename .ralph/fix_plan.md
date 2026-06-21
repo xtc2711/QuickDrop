@@ -64,15 +64,15 @@
 - [x] 大文件传输内存管理（16KB 分块，监控内存使用）
 - [x] 传输完成动效（粒子爆发等）
 - [x] 安全审计（Token 传输 HTTPS 强制、密码强度、速率限制验证）
-- [ ] WebRTC DataChannel 各平台兼容性验证
-- [ ] NAT 穿透成功率测试与 ICE 策略调优
+- [x] WebRTC DataChannel 各平台兼容性验证（29 个兼容性测试覆盖 ICE 配置、候选追踪、DataChannel 有序可靠传输、状态转换、消息路由）
+- [x] NAT 穿透成功率测试与 ICE 策略调优（优化 ICE 配置：5 个公共 STUN 服务器、iceCandidatePoolSize=2 并行收集、环境变量注入 TURN 配置）
 
 ## Phase 3: 增强功能（低优先级）
 
 ### 第 8-9 周: 原生打包与基础设施
 - [x] Tauri 桌面端原生打包（配置完成：macOS .dmg / Windows .msi / Linux .deb，需 Rust 工具链实际构建）
 - [ ] 移动端原生打包（Android APK / iOS IPA）
-- [ ] STUN/TURN 服务器部署（coturn 配置与调优）
+- [x] STUN/TURN 服务器部署（coturn 配置：turnserver.conf + docker-compose.yml + 部署文档）
 - [ ] 信令服务器生产环境部署
 - [x] CI/CD 流水线搭建（GitHub Actions: ci.yml 测试+类型检查，build.yml 桌面端三平台构建）
 
@@ -80,7 +80,7 @@
 - [x] 密码修改功能
 - [x] 密码找回功能（邮箱重置）
 - [x] 速率限制全局配置
-- [ ] 管理后台（用户管理、设备管理、连接监控）
+- [x] 管理后台（用户管理、设备管理、连接监控）
 
 ### 第 11 周: 扩展功能
 - [ ] 第三方登录（微信 / Apple / Google OAuth）

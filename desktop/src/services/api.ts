@@ -147,3 +147,133 @@ export async function fetchDevices(): Promise<{
 export async function removeDevice(deviceId: string): Promise<{ message: string }> {
   return request(`/devices/${deviceId}`, { method: "DELETE" });
 }
+
+// ============================================================
+// Admin API（需要管理员权限）
+// ============================================================
+
+export interface DashboardStats {
+  total_users: number;
+  total_devices: number;
+  online_devices: number;
+  locked_users: number;
+  users_registered_today: number;
+  users_registered_this_week: number;
+  active_users_24h: number;
+}
+
+export interface AdminUserItem {
+  id: string;
+  email: string;
+  is_locked: boolean;
+  is_admin: boolean;
+  failed_login_attempts: number;
+  device_count: number;
+  online_device_count: number;
+  created_at: string;
+  last_active: string | null;
+}
+
+export interface AdminDeviceItem {
+  id: string;
+  device_name: string;
+  device_type: string;
+  os: string;
+  is_online: boolean;
+  user_email: string;
+  user_id: string;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+/**
+ * 检查当前用户是否为管理员
+ * 如果请求成功（200）则说明是管理员，如果 403 则不是
+ */
+export async function checkIsAdmin(): Promise<boolean> {
+  try {
+    await request("/admin/stats");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 获取仪表盘统计
+ */
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  return request("/admin/stats");
+}
+
+/**
+ * 获取用户列表
+ */
+export async function fetchAdminUsers(params: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  is_locked?: boolean;
+} = {}): Promise<PaginatedResult<AdminUserItem>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set("page", String(params.page));
+  if (params.page_size) query.set("page_size", String(params.page_size));
+  if (params.search) query.set("search", params.search);
+  if (params.is_locked !== undefined) query.set("is_locked", String(params.is_locked));
+  const qs = query.toString();
+  return request(`/admin/users${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * 切换用户锁定状态
+ */
+export async function toggleUserLock(userId: string): Promise<{ is_locked: boolean }> {
+  return request(`/admin/users/${userId}/lock`, { method: "POST" });
+}
+
+/**
+ * 切换用户管理员权限
+ */
+export async function toggleUserAdmin(userId: string): Promise<{ is_admin: boolean }> {
+  return request(`/admin/users/${userId}/admin`, { method: "POST" });
+}
+
+/**
+ * 删除用户
+ */
+export async function deleteUser(userId: string): Promise<{ message: string }> {
+  return request(`/admin/users/${userId}`, { method: "DELETE" });
+}
+
+/**
+ * 获取设备列表（管理员视角）
+ */
+export async function fetchAdminDevices(params: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  is_online?: boolean;
+} = {}): Promise<PaginatedResult<AdminDeviceItem>> {
+  const query = new URLSearchParams();
+  if (params.page) query.set("page", String(params.page));
+  if (params.page_size) query.set("page_size", String(params.page_size));
+  if (params.search) query.set("search", params.search);
+  if (params.is_online !== undefined) query.set("is_online", String(params.is_online));
+  const qs = query.toString();
+  return request(`/admin/devices${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * 强制移除设备（管理员）
+ */
+export async function forceRemoveDevice(deviceId: string): Promise<{ message: string }> {
+  return request(`/admin/devices/${deviceId}`, { method: "DELETE" });
+}

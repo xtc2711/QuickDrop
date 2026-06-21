@@ -22,6 +22,7 @@ model User {
   isLocked             Boolean   @default(false) @map("is_locked")
   lockedUntil          DateTime? @map("locked_until")
   failedLoginAttempts  Int       @default(0) @map("failed_login_attempts")
+  isAdmin              Boolean   @default(false) @map("is_admin")
 
   devices            Device[]
   refreshTokens      RefreshToken[]
