@@ -1,10 +1,12 @@
 package com.quickdrop.app.webview
 
 import android.content.Intent
+import android.net.Uri
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.quickdrop.app.QuickDropApplication
 import com.quickdrop.app.camera.QRScannerActivity
+import org.json.JSONArray
 
 /**
  * JavaScript ↔ Android Native 桥接
@@ -12,14 +14,20 @@ import com.quickdrop.app.camera.QRScannerActivity
  * 暴露给 WebView 中 JS 调用的原生能力：
  * - 扫码
  * - Token 存取
- * - 文件选择（TODO）
- * - 前台服务控制（TODO）
+ * - 文件选择（通过系统文件选择器，支持多选）
+ * - 前台服务控制
  *
  * Web 端调用方式：window.QuickDropBridge.<method>()
  */
 class JSBridge(private val webView: WebView) {
 
     private val tokenManager = QuickDropApplication.instance.tokenManager
+
+    /**
+     * 文件选择回调 — 由 MainActivity 注入
+     * 用于触发系统文件选择器（需要 Activity 级别的 ActivityResultLauncher）
+     */
+    var filePickerCallback: (() -> Unit)? = null
 
     /**
      * 打开扫码页面
@@ -84,19 +92,42 @@ class JSBridge(private val webView: WebView) {
     }
 
     /**
-     * 选择文件（触发 Android 文件选择器）
+     * 选择文件（触发 Android 系统文件选择器，支持多选）
      * JS 调用: QuickDropBridge.pickFiles()
-     * 结果将通过回调通知 JS
+     *
+     * 依赖 MainActivity 注入的 filePickerCallback 来启动 ActivityResultLauncher。
+     * 结果通过 onFilesPicked() 回调给 JS 的 onNativeFilePicked(filePathsJson)。
      */
     @JavascriptInterface
     fun pickFiles() {
-        // TODO: 实现系统文件选择器，通过 evaluateJavascript 回调文件路径
+        filePickerCallback?.invoke()
+    }
+
+    /**
+     * 文件选择完成回调（由 MainActivity 在收到文件选择结果后调用）
+     * @param filePaths 可访问的文件路径列表（已从 content URI 复制到临时目录）
+     */
+    fun onFilesPicked(filePaths: List<String>) {
+        val jsonArray = JSONArray(filePaths)
+        val escaped = escapeForJS(jsonArray.toString())
         webView.post {
             webView.evaluateJavascript(
-                "if(typeof onNativeFilePicked === 'function') onNativeFilePicked([])",
+                "if(typeof onNativeFilePicked === 'function') onNativeFilePicked('$escaped')",
                 null
             )
         }
+    }
+
+    /**
+     * JS 字符串转义 — 用于安全地注入 JS 代码
+     * 对应 iOS JSBridge.escapeForJS()
+     */
+    private fun escapeForJS(str: String): String {
+        return str
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
     }
 
     /**
