@@ -39,6 +39,10 @@ import {
   IncrementalSHA256,
   logMemoryUsage,
 } from "../../../shared/utils/index";
+import {
+  notifyTransferComplete,
+  notifyTransferFailed,
+} from "./notificationService.js";
 
 // ============================================================
 // 类型定义
@@ -385,6 +389,7 @@ class FileTransferService {
         sha256_match: true,
         retry_count: transfer.retryCount,
       });
+      notifyTransferComplete(transfer.file.name, "sent");
       this.activeSends.delete(msg.fileId);
       this.processQueue();
     } else {
@@ -405,6 +410,7 @@ class FileTransferService {
           retry_count: transfer.retryCount,
           error_message: `SHA256 校验 ${MAX_RETRY_COUNT} 次不匹配，传输失败`,
         });
+        notifyTransferFailed(transfer.file.name, "SHA256 校验多次不匹配");
         this.activeSends.delete(msg.fileId);
         this.processQueue();
       }
@@ -423,10 +429,9 @@ class FileTransferService {
       await this.doSend(transfer);
     } catch (err) {
       if (!transfer.cancelled) {
-        transfer.callbacks.onError(
-          transfer.fileId,
-          err instanceof Error ? err.message : "传输失败",
-        );
+        const errorMsg = err instanceof Error ? err.message : "传输失败";
+        transfer.callbacks.onError(transfer.fileId, errorMsg);
+        notifyTransferFailed(transfer.file.name, errorMsg);
         transfer.callbacks.onComplete({
           file_id: transfer.fileId,
           file_name: transfer.file.name,
@@ -804,6 +809,7 @@ class FileTransferService {
         sha256_match: true,
         retry_count: 0,
       });
+      notifyTransferComplete(state.fileName, "received");
     } else {
       state.callbacks.onComplete({
         file_id: state.fileId,
@@ -813,6 +819,7 @@ class FileTransferService {
         retry_count: 0,
         error_message: "SHA256 校验不匹配，等待发送端重传",
       });
+      notifyTransferFailed(state.fileName, "SHA256 校验不匹配");
     }
 
     logMemoryUsage(`接收完成: ${state.fileName}`);
