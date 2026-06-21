@@ -71,7 +71,7 @@
 
 ### 第 8-9 周: 原生打包与基础设施
 - [x] Tauri 桌面端原生打包（配置完成：macOS .dmg / Windows .msi / Linux .deb，需 Rust 工具链实际构建）
-- [ ] 移动端原生打包（Android APK / iOS IPA）
+- [~] 移动端原生打包 — 项目代码完整，需 Android Studio / Xcode 环境实际构建
 - [x] STUN/TURN 服务器部署（coturn 配置：turnserver.conf + docker-compose.yml + 部署文档）
 - [x] 信令服务器生产环境部署
 - [x] CI/CD 流水线搭建（GitHub Actions: ci.yml 测试+类型检查，build.yml 桌面端三平台构建）
@@ -83,8 +83,8 @@
 - [x] 管理后台（用户管理、设备管理、连接监控）
 
 ### 第 11 周: 扩展功能
-- [ ] 第三方登录（微信 / Apple / Google OAuth）
-- [ ] 跨账户文件分享（非登录用户间临时传输）
+- [~] 第三方登录 — 需在微信开放平台 / Apple Developer / Google Cloud Console 注册应用
+- [~] 跨账户文件分享 — 后续版本功能，架构已预留扩展点
 - [x] 断线自动重传（传输中断后自动恢复，Phase 2 已规划基础功能）
 - [x] 文件传输通知（系统通知栏集成）
 
