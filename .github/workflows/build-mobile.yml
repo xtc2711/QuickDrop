@@ -63,6 +63,9 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          # AGP 8.2.2 + Kotlin 1.9.22 兼容 Gradle 8.2 ~ 8.5
+          gradle-version: '8.5'
 
       - name: Build Debug APK (gradle 直接调用，无需 gradlew)
         working-directory: mobile/android
