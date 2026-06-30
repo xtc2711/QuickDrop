@@ -69,18 +69,28 @@ jobs:
 
       - name: Build Debug APK (gradle 直接调用，无需 gradlew)
         working-directory: mobile/android
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          set +e
+          gradle assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          GRADLE_EXIT=$?
+          echo "Gradle exit code: $GRADLE_EXIT"
+          echo "===== build.log tail (last 100 lines) ====="
+          tail -n 100 build.log
+          exit $GRADLE_EXIT
         env:
           GRADLE_OPTS: -Dorg.gradle.daemon=false
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: quickdrop-android
           path: |
             mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/build.log
           retention-days: 30
+          if-no-files-found: warn
 
   # ---------- iOS 构建（.ipa）----------
   # 注意：iOS 构建需要 Apple 开发者账号配置
