@@ -17,12 +17,5 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# ---------------------------------------------------------------
-# 修复 cookie 0.18.1 与 time 0.3.52 的 API 兼容性问题
-# 错误: cookie 0.18.1 调用 time::format.parse() 时只传了 1 个参数，
-#       但 time 0.3.52 把签名改成需要 2 个参数 (input, Option<Parsed>)
-# 解决: 用 [patch.crates-io] 强制 time 锁到 0.3.41（cookie 兼容版本）
-# ---------------------------------------------------------------
-[patch.crates-io]
-time = { git = "https://github.com/time-rs/time.git", tag = "v0.3.41" }
+# 锁定 time 到 0.3.41 以解决 cookie 0.18.1 与 time 0.3.52+ 的 API 不兼容问题
+# (cookie 调用 time::format::parse() 时只传 1 个参数，但 time 0.3.52 把签名改成需要 2 个参数)
