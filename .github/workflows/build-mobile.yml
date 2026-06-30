@@ -54,15 +54,26 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # v3 API：必须用 packages 而不是 android-sdk-version/build-tools-version/platforms
+          # v3 API：用 packages 参数安装 SDK 与构建工具
           packages: |
             platforms;android-34
             build-tools;34.0.0
-            cmdline-tools;latest
             platform-tools
+          # 让 action 自动接受 license，无需单独运行 sdkmanager
+          accept-android-sdk-licenses: true
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
+      - name: Diagnose environment
+        run: |
+          echo "=== ANDROID_HOME ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "=== java ==="
+          java -version
+          echo "=== gradle ==="
+          gradle --version
+          echo "=== sdkmanager ==="
+          which sdkmanager
+          sdkmanager --list_installed 2>&1 | head -20 || echo "sdkmanager failed"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
