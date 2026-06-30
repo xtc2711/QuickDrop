@@ -51,16 +51,13 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
+      # 用 v4（使用 node24），packages 用逗号分隔单行字符串
+      # 之前 v3 + block scalar 格式 12 秒内失败，疑似 packages 解析异常
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          # v3 API：用 packages 参数安装 SDK 与构建工具
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            platform-tools
-          # 让 action 自动接受 license，无需单独运行 sdkmanager
-          accept-android-sdk-licenses: true
+          packages: 'platforms;android-34,build-tools;34.0.0,platform-tools'
+          accept-android-sdk-licenses: 'true'
 
       - name: Diagnose environment
         run: |
