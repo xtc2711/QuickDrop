@@ -19,24 +19,13 @@ Daemon will be stopped at the end of the build
 > Task :app:javaPreCompileDebug
 > Task :app:mergeDebugShaders
 > Task :app:compileDebugShaders NO-SOURCE
+> Task :app:processDebugManifestForPackage
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets
-> Task :app:desugarDebugFileDependencies
 > Task :app:compressDebugAssets
-> Task :app:mergeDebugJniLibFolders
-> Task :app:checkDebugDuplicateClasses
-> Task :app:mergeDebugNativeLibs
-> Task :app:processDebugManifestForPackage
-> Task :app:mergeExtDexDebug
-> Task :app:mergeLibDexDebug
-
-> Task :app:stripDebugDebugSymbols
-Unable to strip the following libraries, packaging them as they are: libbarhopper_v3.so, libimage_processing_util_jni.so.
-
+> Task :app:desugarDebugFileDependencies
 > Task :app:processDebugResources
-> Task :app:validateSigningDebug
-> Task :app:writeDebugAppMetadata
-> Task :app:writeDebugSigningConfigVersions
+> Task :app:checkDebugDuplicateClasses
 
 > Task :app:compileDebugKotlin
 w: file:///home/runner/work/QuickDrop/QuickDrop/mobile/android/app/src/main/java/com/quickdrop/app/MainActivity.kt:119:19 'onBackPressed(): Unit' is deprecated. Deprecated in Java
@@ -44,15 +33,26 @@ w: file:///home/runner/work/QuickDrop/QuickDrop/mobile/android/app/src/main/java
 w: file:///home/runner/work/QuickDrop/QuickDrop/mobile/android/app/src/main/java/com/quickdrop/app/webview/WebViewConfig.kt:46:18 'setter for allowFileAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java
 w: file:///home/runner/work/QuickDrop/QuickDrop/mobile/android/app/src/main/java/com/quickdrop/app/webview/WebViewConfig.kt:47:18 'setter for allowUniversalAccessFromFileURLs: Boolean' is deprecated. Deprecated in Java
 
+> Task :app:mergeExtDexDebug
 > Task :app:compileDebugJavaWithJavac
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics
 > Task :app:processDebugJavaRes
+> Task :app:mergeLibDexDebug
+> Task :app:mergeDebugJniLibFolders
 > Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugNativeLibs
 > Task :app:mergeDebugJavaResource
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libbarhopper_v3.so, libimage_processing_util_jni.so.
+
 > Task :app:packageDebug
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
 
-BUILD SUCCESSFUL in 2m 7s
+BUILD SUCCESSFUL in 2m 4s
 37 actionable tasks: 37 executed
