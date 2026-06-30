@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import CoreImage
 
 /// 二维码扫描视图控制器
 ///
@@ -164,7 +165,7 @@ final class QRScannerViewController: UIViewController {
         let overlay = UIView(frame: view.bounds)
         overlay.backgroundColor = UIColor.black.withAlphaComponent(0.5)
         overlay.translatesAutoresizingMaskIntoConstraints = false
-        view.insertSubview(overlay, aboveSubview: previewLayer?.superview ?? view)
+        view.insertSubview(overlay, at: 1)
 
         // 在遮罩上挖出扫描框区域
         let maskLayer = CAShapeLayer()
@@ -247,8 +248,6 @@ extension QRScannerViewController: AVCaptureVideoDataOutputSampleBufferDelegate 
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         let context = CIContext()
         guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
-
-        let uiImage = UIImage(cgImage: cgImage)
 
         // 使用 CIDetector 检测二维码
         guard let detector = CIDetector(

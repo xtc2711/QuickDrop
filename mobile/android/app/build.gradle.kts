@@ -15,11 +15,6 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // 信令服务和认证服务地址（开发环境）
-        buildConfigField("String", "AUTH_BASE_URL", "\"http://10.0.2.2:3001\"")
-        buildConfigField("String", "SIGNAL_WS_URL", "\"ws://10.0.2.2:3002\"")
-        // 10.0.2.2 是 Android 模拟器中宿主机的 localhost
     }
 
     buildTypes {
@@ -29,9 +24,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // 生产环境地址（与 iOS AppConfig 一致）
+            buildConfigField("String", "AUTH_BASE_URL", "\"https://signal.quickdrop.app/api/v1\"")
+            buildConfigField("String", "SIGNAL_WS_URL", "\"wss://signal.quickdrop.app\"")
         }
         debug {
             isMinifyEnabled = false
+            // 开发环境：10.0.2.2 是 Android 模拟器中宿主机的 localhost
+            buildConfigField("String", "AUTH_BASE_URL", "\"http://10.0.2.2:3003/api/v1\"")
+            buildConfigField("String", "SIGNAL_WS_URL", "\"ws://10.0.2.2:3002\"")
         }
     }
 

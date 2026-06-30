@@ -56,7 +56,7 @@ export class AuthService {
         deviceName: input.device_name,
         deviceType: input.device_type,
         os: input.os,
-        isOnline: true,
+        isOnline: false,
       },
     });
 
@@ -146,7 +146,8 @@ export class AuthService {
     if (device) {
       device = await prisma.device.update({
         where: { id: device.id },
-        data: { isOnline: true, lastSeen: new Date() },
+        // isActive=true: 之前被移除的设备重新登录时自动恢复
+        data: { isOnline: false, isActive: true, lastSeen: new Date() },
       });
     } else {
       device = await prisma.device.create({
@@ -155,7 +156,7 @@ export class AuthService {
           deviceName: input.device_name,
           deviceType: input.device_type,
           os: input.os,
-          isOnline: true,
+          isOnline: false,
         },
       });
     }

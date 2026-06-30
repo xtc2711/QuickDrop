@@ -53,11 +53,12 @@ export function handleConnection(ws: WebSocket, payload: WsJwtPayload): void {
         case "offer":
         case "answer":
         case "ice_candidate":
+        case "debug_report":
           handleSignalingMessage(ws, payload, message);
           break;
 
         default:
-          console.warn(`Unknown message type: ${message.type}`);
+          console.warn(`Unknown message type: ${message.type}`, (message as any)?.payload);
       }
     } catch (err) {
       console.error("Failed to parse message:", err);
@@ -80,6 +81,9 @@ export function handleConnection(ws: WebSocket, payload: WsJwtPayload): void {
   // 监听错误
   ws.on("error", (err) => {
     console.error(`WebSocket error on device ${payload.device_id}:`, err.message);
+    // 错误后必须清理：幽灵设备会导致在线状态错误
+    deviceManager.unregister(payload.device_id);
+    try { ws.close(1011, "Internal error"); } catch { /* 已关闭 */ }
   });
 }
 
@@ -99,6 +103,18 @@ function handleDeviceInfo(deviceId: string, payload: unknown): void {
       if (info.device_name) device.deviceName = info.device_name;
       if (info.device_type) device.deviceType = info.device_type as "desktop" | "phone" | "tablet";
       if (info.os) device.os = info.os as "windows" | "macos" | "android" | "ios";
+
+      // 名称更新后通知同账户其他设备，修正初始 "unknown" 名称
+      deviceManager.broadcastToUser(device.userId, {
+        type: "device_online",
+        payload: {
+          device_id: device.deviceId,
+          device_name: device.deviceName,
+          device_type: device.deviceType,
+          os: device.os,
+        },
+        timestamp: new Date().toISOString(),
+      }, deviceId);
     }
   }
 }

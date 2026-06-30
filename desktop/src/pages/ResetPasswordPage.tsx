@@ -1,6 +1,5 @@
 // ============================================================
-// 桌面客户端 — 重置密码页面
-// 通过邮件中的链接访问: /reset-password?token=xxx
+// 桌面客户端 — 重置密码页面（桌面端左右分栏布局）
 // ============================================================
 
 import { useState, FormEvent } from "react";
@@ -26,19 +25,16 @@ export default function ResetPasswordPage() {
       setError("缺少重置令牌，请从邮件中的链接访问此页面");
       return;
     }
-
     if (newPassword !== confirmPassword) {
       setError("两次输入的密码不一致");
       return;
     }
-
     if (newPassword.length < 8) {
       setError("新密码至少需要 8 位");
       return;
     }
 
     setLoading(true);
-
     try {
       await resetPassword({ token, new_password: newPassword });
       setSuccess(true);
@@ -49,98 +45,94 @@ export default function ResetPasswordPage() {
     }
   };
 
-  if (!token && !success) {
-    return (
-      <div className="page-container">
-        <h1 className="page-title">无效的访问</h1>
-        <div className="card" style={{ textAlign: "center" }}>
-          <p style={{ color: "var(--color-error)", marginBottom: 16 }}>
-            缺少重置令牌。请从密码重置邮件中的链接访问此页面。
+  const formContent = () => {
+    if (!token && !success) {
+      return (
+        <>
+          <h2>无效的访问</h2>
+          <p className="auth-subtitle">缺少重置令牌，请从密码重置邮件中的链接访问此页面。</p>
+          <div className="alert alert-error">缺少重置令牌</div>
+          <p style={{ textAlign: "center", marginTop: 16 }}>
+            <Link to="/forgot-password" style={{ color: "var(--color-primary)", fontSize: 14 }}>
+              重新请求密码重置
+            </Link>
           </p>
-          <Link to="/forgot-password" style={{ color: "var(--color-primary)" }}>
-            重新请求密码重置
-          </Link>
-        </div>
-      </div>
-    );
-  }
+        </>
+      );
+    }
 
-  if (success) {
-    return (
-      <div className="page-container">
-        <h1 className="page-title">密码重置成功</h1>
-        <div className="card" style={{ textAlign: "center" }}>
-          <p style={{ fontSize: 15, lineHeight: 1.6, color: "var(--color-text)" }}>
-            你的密码已成功重置。
-            <br />
-            所有设备已退出登录，请使用新密码重新登录。
-          </p>
+    if (success) {
+      return (
+        <>
+          <h2>密码重置成功</h2>
+          <p className="auth-subtitle">你的密码已成功重置。所有设备已退出登录。</p>
+          <div className="alert alert-success">密码已成功重置，请使用新密码重新登录。</div>
           <button
             className="btn-primary"
-            style={{ marginTop: 24, padding: "12px 32px" }}
+            style={{ marginTop: 16, width: "100%", padding: 12 }}
             onClick={() => navigate("/login")}
           >
             前往登录
           </button>
-        </div>
-      </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <h2>重置密码</h2>
+        <p className="auth-subtitle">输入新密码，重置后所有设备将退出登录。</p>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="newPassword">新密码</label>
+            <input
+              id="newPassword"
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="至少 8 位，含大写、小写、数字"
+              required
+              autoFocus
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="confirmPassword">确认新密码</label>
+            <input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="再次输入新密码"
+              required
+            />
+          </div>
+
+          {error && <div className="alert alert-error">{error}</div>}
+
+          <button type="submit" className="btn-primary" disabled={loading} style={{ width: "100%", padding: 12, marginTop: 8 }}>
+            {loading ? "重置中..." : "重置密码"}
+          </button>
+        </form>
+      </>
     );
-  }
+  };
 
   return (
-    <div className="page-container">
-      <h1 className="page-title">重置密码</h1>
-
-      <form onSubmit={handleSubmit} className="card">
-        <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 16 }}>
-          输入你的新密码。重置后所有设备将退出登录。
-        </p>
-
-        <div className="form-group">
-          <label className="form-label" htmlFor="newPassword">
-            新密码
-          </label>
-          <input
-            id="newPassword"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="至少 8 位，含大写、小写、数字"
-            required
-            autoFocus
-            minLength={8}
-          />
+    <div className="auth-page">
+      <div className="auth-brand">
+        <div className="auth-brand-content">
+          <h1>QuickDrop</h1>
+          <p>重置你的密码，恢复对设备的访问。</p>
         </div>
+      </div>
 
-        <div className="form-group">
-          <label className="form-label" htmlFor="confirmPassword">
-            确认新密码
-          </label>
-          <input
-            id="confirmPassword"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="再次输入新密码"
-            required
-          />
+      <div className="auth-form-area">
+        <div className="auth-form-card">
+          {formContent()}
         </div>
-
-        {error && (
-          <div className="form-error" style={{ marginBottom: 16 }}>
-            {error}
-          </div>
-        )}
-
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={loading}
-          style={{ width: "100%", padding: 12 }}
-        >
-          {loading ? "重置中..." : "重置密码"}
-        </button>
-      </form>
+      </div>
     </div>
   );
 }

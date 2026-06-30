@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
         // 开发环境：加载本地开发服务器
         // 生产环境：加载打包后的 assets
         val url = if (com.quickdrop.app.BuildConfig.DEBUG) {
-            "http://10.0.2.2:5173" // Vite 开发服务器
+            "http://10.0.2.2:1420" // Vite 开发服务器（与 iOS AppConfig 端口一致）
         } else {
             "file:///android_asset/web/index.html"
         }

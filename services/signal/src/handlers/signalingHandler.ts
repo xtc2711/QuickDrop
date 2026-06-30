@@ -23,35 +23,36 @@ export function handleSignalingMessage(
   message: WsMessage,
 ): void {
   const { type, payload, target } = message;
+  const ts = new Date().toISOString();
+
+  console.log(`[signal] ${type} from ${sender.device_id.slice(0,8)} → ${(target||'?').slice(0,8)}`);
 
   if (!target) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        payload: { message: "缺少 target 字段，无法路由信令消息" },
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    console.warn(`[signal] ${type} missing target`);
+    ws.send(JSON.stringify({
+      type: "error",
+      payload: { message: "缺少 target 字段，无法路由信令消息" },
+      timestamp: ts,
+    }));
     return;
   }
 
-  // 透传给目标设备
+  // 透传给目标设备（保持 payload 原样，不展开 SDP）
   const sent = deviceManager.sendToDevice(target, {
     type,
-    payload: {
-      ...(payload as Record<string, unknown>),
-      from_device_id: sender.device_id,
-    },
-    timestamp: new Date().toISOString(),
+    payload: payload,
+    from_device_id: sender.device_id,
+    timestamp: ts,
   });
 
   if (!sent) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        payload: { message: "目标设备不在线", target_device_id: target },
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    console.warn(`[signal] ${type} FAILED: target ${target.slice(0,8)} not online`);
+    ws.send(JSON.stringify({
+      type: "error",
+      payload: { message: "目标设备不在线", target_device_id: target },
+      timestamp: ts,
+    }));
+  } else {
+    console.log(`[signal] ${type} forwarded to ${target.slice(0,8)}`);
   }
 }

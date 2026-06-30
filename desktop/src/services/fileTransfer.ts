@@ -52,6 +52,8 @@ export interface TransferCallbacks {
   onProgress: (progress: TransferProgress) => void;
   onComplete: (result: TransferResult) => void;
   onError: (fileId: string, error: string) => void;
+  /** 移动端保存回调：如果提供，由调用方处理文件保存 */
+  onSaveNeeded?: (fileName: string, blob: Blob) => void;
 }
 
 interface ActiveTransfer {
@@ -800,7 +802,7 @@ class FileTransferService {
 
     if (match) {
       // 🧠 Blob 组装：不复制 ArrayBuffer，直接引用已接收的分块
-      this.saveReceivedFile(state.fileName, state.chunks);
+      this.saveReceivedFile(state.fileName, state.chunks, state.callbacks);
 
       state.callbacks.onComplete({
         file_id: state.fileId,
@@ -839,12 +841,18 @@ class FileTransferService {
   private saveReceivedFile(
     fileName: string,
     chunks: ArrayBuffer[],
+    callbacks: TransferCallbacks,
   ): void {
-    // 🧠 Blob 直接引用分块 ArrayBuffer，不进行内存复制
-    // new Blob(chunks) 按规范不复制底层数据
     const blob = new Blob(chunks, { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
 
+    // 移动端：由调用方通过 onSaveNeeded 处理保存
+    if (callbacks.onSaveNeeded) {
+      callbacks.onSaveNeeded(fileName, blob);
+      return;
+    }
+
+    // 桌面端：触发浏览器下载
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = fileName;
@@ -883,6 +891,18 @@ class FileTransferService {
         // 不清除 activeSends，等待接收端请求续传
       }
     }
+  }
+
+  /**
+   * 清除指定设备的残留中断传输（AppLayout 新接收时调用）
+   */
+  clearInterruptedForDevice(deviceId: string): void {
+    const toDelete: string[] = [];
+    for (const [fileId, state] of this.interruptedReceives) {
+      const devId = this.dcToDeviceId.get(state.dc);
+      if (devId === deviceId) toDelete.push(fileId);
+    }
+    for (const id of toDelete) this.interruptedReceives.delete(id);
   }
 
   /**

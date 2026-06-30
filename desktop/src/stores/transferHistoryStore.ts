@@ -30,6 +30,8 @@ export interface TransferHistoryRecord {
   sha256Match: boolean;
   /** 错误信息（失败时） */
   errorMessage?: string;
+  /** 文件保存路径 */
+  filePath?: string;
 }
 
 interface TransferHistoryState {

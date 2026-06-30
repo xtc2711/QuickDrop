@@ -92,6 +92,38 @@ class JSBridge(private val webView: WebView) {
     }
 
     /**
+     * 保存接收到的文件到本地存储
+     * JS 调用: QuickDropBridge.saveReceivedFile(fileName, base64Data)
+     *
+     * 将 base64 数据解码写入缓存目录，然后弹出系统分享面板让用户选择保存位置
+     */
+    @JavascriptInterface
+    fun saveReceivedFile(fileName: String, base64Data: String) {
+        try {
+            val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+            val cacheDir = webView.context.cacheDir
+            val file = java.io.File(cacheDir, fileName)
+            file.writeBytes(bytes)
+
+            // 通过 FileProvider 获取 URI，启动分享 Intent
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                webView.context,
+                "${webView.context.packageName}.fileprovider",
+                file
+            )
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "*/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            webView.context.startActivity(android.content.Intent.createChooser(shareIntent, "保存文件"))
+        } catch (e: Exception) {
+            android.util.Log.e("JSBridge", "saveReceivedFile failed", e)
+        }
+    }
+
+    /**
      * 选择文件（触发 Android 系统文件选择器，支持多选）
      * JS 调用: QuickDropBridge.pickFiles()
      *

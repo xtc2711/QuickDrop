@@ -3,7 +3,7 @@
 # 使用 XcodeGen 生成 .xcodeproj：
 #   $ brew install xcodegen
 #   $ cd mobile/ios && xcodegen generate
-#
+#1
 # 如需手动创建 Xcode 项目：
 #   1. 打开 Xcode → New Project → iOS App
 #   2. Product Name: QuickDrop, Interface: Storyboard, Language: Swift
@@ -23,6 +23,9 @@ settings:
     SWIFT_VERSION: "5.9"
     INFOPLIST_FILE: QuickDrop/Info.plist
     DEVELOPMENT_TEAM: "" # 设置你的 Apple Developer Team ID
+    # 禁用 workspace 配置
+    WORKSPACE_FILE: ""
+    CREATE_WORKSPACE: "NO"
 
 targets:
   QuickDrop:

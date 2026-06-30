@@ -50,6 +50,8 @@ final class JSBridge: NSObject, WKScriptMessageHandler {
             handleGetAuthBaseUrl()
         case "getSignalWsUrl":
             handleGetSignalWsUrl()
+        case "saveReceivedFile":
+            handleSaveReceivedFile(body)
         default:
             print("[JSBridge] Unknown action: \(action)")
         }
@@ -83,6 +85,38 @@ final class JSBridge: NSObject, WKScriptMessageHandler {
         picker.allowsMultipleSelection = true
         picker.delegate = self
         vc.present(picker, animated: true)
+    }
+
+    private func handleSaveReceivedFile(_ body: [String: Any]) {
+        guard let fileName = body["fileName"] as? String,
+              let base64 = body["data"] as? String,
+              let fileData = Data(base64Encoded: base64) else {
+            print("[JSBridge] saveReceivedFile: invalid data")
+            return
+        }
+
+        // 保存到临时目录
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        do {
+            try fileData.write(to: fileURL)
+            print("[JSBridge] File saved to: \(fileURL.path)")
+        } catch {
+            print("[JSBridge] Failed to save file: \(error)")
+            return
+        }
+
+        // 在主线程弹出分享面板，让用户选择保存位置
+        DispatchQueue.main.async { [weak self] in
+            guard let vc = self?.viewController else { return }
+            let activityVC = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+            // iPad 适配
+            if let popover = activityVC.popoverPresentationController {
+                popover.sourceView = vc.view
+                popover.sourceRect = CGRect(x: vc.view.bounds.midX, y: vc.view.bounds.midY, width: 0, height: 0)
+            }
+            vc.present(activityVC, animated: true)
+        }
     }
 
     private func handleGetAuthBaseUrl() {

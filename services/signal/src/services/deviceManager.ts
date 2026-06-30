@@ -21,6 +21,7 @@ class DeviceManager {
    * 注册设备上线
    */
   register(device: DeviceState): void {
+    console.log(`[device] register ${device.deviceName} (${device.deviceId.slice(0,8)}) os=${device.os}`);
     this.devices.set(device.deviceId, device);
 
     // 维护用户设备索引
@@ -60,10 +61,8 @@ class DeviceManager {
       }),
     );
 
-    // 启动心跳检测（首次注册时）
-    if (!this.heartbeatTimer) {
-      this.startHeartbeat();
-    }
+    // 确保心跳检测运行
+    this.ensureHeartbeatRunning();
   }
 
   /**
@@ -72,6 +71,7 @@ class DeviceManager {
   unregister(deviceId: string): void {
     const device = this.devices.get(deviceId);
     if (!device) return;
+    console.log(`[device] unregister ${device.deviceName} (${deviceId.slice(0,8)}) remaining=${this.devices.size - 1}`);
 
     this.devices.delete(deviceId);
 
@@ -90,11 +90,9 @@ class DeviceManager {
       timestamp: new Date().toISOString(),
     }, deviceId);
 
-    // 清理心跳定时器
-    if (this.devices.size === 0 && this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    // 心跳定时器始终运行，避免幽灵设备无人清理
+    // （WebSocket 报错时 unregister 可能未被调用，心跳是最后防线）
+    this.ensureHeartbeatRunning();
   }
 
   /**
@@ -153,6 +151,15 @@ class DeviceManager {
     if (device) {
       device.lastHeartbeat = new Date();
       device.isAlive = true;
+    }
+  }
+
+  /**
+   * 确保心跳定时器在运行（有设备时）
+   */
+  private ensureHeartbeatRunning(): void {
+    if (!this.heartbeatTimer && this.devices.size > 0) {
+      this.startHeartbeat();
     }
   }
 

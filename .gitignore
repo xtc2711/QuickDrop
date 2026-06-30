@@ -30,7 +30,22 @@ coverage/
 
 # Tauri
 desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # Prisma
 services/auth/prisma/*.db
 services/auth/prisma/*.db-journal
+
+# Ralph — 内部 agent 状态目录（不应提交）
+.ralph/
+
+# Xcode 自动生成（应用 project.yml + xcodegen 生成）
+*.xcodeproj/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
+
+# Cargo 锁文件（CI 环境生成，本地不提交）
+desktop/src-tauri/Cargo.lock

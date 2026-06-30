@@ -49,6 +49,18 @@ function parseIceServers(): RTCIceServer[] {
         servers.push({ urls: url, username, credential });
       }
     }
+  } else {
+    // 开发环境默认：本地 TURN 服务器
+    servers.push({
+      urls: [
+        "turn:127.0.0.1:3478?transport=udp",
+        "turn:127.0.0.1:3478?transport=tcp",
+        "turn:192.168.100.144:3478?transport=udp",
+        "turn:192.168.100.144:3478?transport=tcp",
+      ],
+      username: "d",
+      credential: "d",
+    });
   }
 
   return servers;
@@ -58,16 +70,8 @@ function buildIceConfig(): RTCConfiguration {
   const iceServers = parseIceServers();
   const config: RTCConfiguration = {
     iceServers,
-    // 并行收集 ICE 候选，减少候选收集延迟
-    // 设为 2 使浏览器并行进行 STUN 查询，而非串行逐个尝试
     iceCandidatePoolSize: 2,
   };
-
-  // 可通过环境变量强制使用 TURN 中继（仅用于测试/调试中继通道）
-  const transportPolicy = import.meta.env.VITE_QD_ICE_TRANSPORT_POLICY;
-  if (transportPolicy === "relay") {
-    config.iceTransportPolicy = "relay";
-  }
 
   return config;
 }
@@ -107,6 +111,13 @@ export interface PeerState {
   state: ConnectionState;
   /** 检测到的连接通道类型 */
   connectionChannel: ConnectionChannel;
+  /** RTT 延迟（毫秒），来自 getStats */
+  rttMs?: number;
+  /** 可用出站带宽（bps），来自 getStats */
+  availableBitrateBps?: number;
+  statsTimer?: ReturnType<typeof setInterval>;
+  /** 信令发送器（用于 ICE restart） */
+  signalingSender?: SignalingSender;
 }
 
 type ConnectionCallback = (deviceId: string, state: ConnectionState) => void;
@@ -133,6 +144,14 @@ interface PendingConnection {
 
 // ---- WebRTCService ----
 
+// 事件类型
+export type WebRTCEvent =
+  | { type: "datachannel_open"; deviceId: string; dc: RTCDataChannel }
+  | { type: "connection_change"; deviceId: string; state: ConnectionState }
+  | { type: "channel_change"; deviceId: string; channel: ConnectionChannel };
+
+type EventHandler = (event: WebRTCEvent) => void;
+
 class WebRTCService {
   /** deviceId → PeerState */
   private peers = new Map<string, PeerState>();
@@ -149,44 +168,40 @@ class WebRTCService {
   /** 连接超时定时器 deviceId → timeoutId */
   private connectionTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
-  /** 回调：连接状态变更 */
-  private onConnectionChange: ConnectionCallback | null = null;
-  /** 回调：DataChannel 就绪 */
-  private onDataChannelReady: DataChannelCallback | null = null;
-  /** 回调：连接通道变更 */
-  private onChannelChange: ChannelCallback | null = null;
+  // === 事件总线（多订阅者，不覆盖） ===
+  private eventListeners = new Set<EventHandler>();
+
+  on(fn: EventHandler): void { this.eventListeners.add(fn); }
+  off(fn: EventHandler): void { this.eventListeners.delete(fn); }
+  private emit(event: WebRTCEvent): void {
+    for (const fn of this.eventListeners) {
+      try { fn(event); } catch (e) { console.error("[webrtc] event handler error:", e); }
+    }
+  }
+
+  // === 向后兼容的单槽回调（内部转为事件总线） ===
+  setConnectionChangeHandler(fn: ConnectionCallback | null): void {
+    this._connHandler = fn;
+  }
+  setDataChannelReadyHandler(fn: DataChannelCallback | null): void {
+    this._dcHandler = fn;
+  }
+  setChannelChangeHandler(fn: ChannelCallback | null): void {
+    this._chHandler = fn;
+  }
+  setGlobalReceiveHandler(fn: DataChannelCallback | null): void {
+    this._globalHandler = fn;
+  }
+  private _connHandler: ConnectionCallback | null = null;
+  private _dcHandler: DataChannelCallback | null = null;
+  private _chHandler: ChannelCallback | null = null;
+  private _globalHandler: DataChannelCallback | null = null;
 
   // ============================================================
   // 公共 API — 配置
   // ============================================================
 
-  /**
-   * 获取当前使用的 ICE 服务器配置
-   */
-  getIceConfig(): RTCConfiguration {
-    return DEFAULT_ICE_CONFIG;
-  }
-
-  /**
-   * 注册连接状态变更回调
-   */
-  setConnectionChangeHandler(fn: ConnectionCallback): void {
-    this.onConnectionChange = fn;
-  }
-
-  /**
-   * 注册 DataChannel 就绪回调
-   */
-  setDataChannelReadyHandler(fn: DataChannelCallback): void {
-    this.onDataChannelReady = fn;
-  }
-
-  /**
-   * 注册连接通道变更回调
-   */
-  setChannelChangeHandler(fn: ChannelCallback): void {
-    this.onChannelChange = fn;
-  }
+  getIceConfig(): RTCConfiguration { return DEFAULT_ICE_CONFIG; }
 
   // ============================================================
   // 公共 API — 查询
@@ -267,6 +282,7 @@ class WebRTCService {
 
     const peer = this.peers.get(deviceId);
     if (peer) {
+      this.stopStatsPolling(deviceId);
       peer.dc?.close();
       peer.pc.close();
       this.peers.delete(deviceId);
@@ -322,8 +338,10 @@ class WebRTCService {
     deviceId: string,
     sendSignaling: SignalingSender,
   ): Promise<void> {
-    // 如果已有连接，先断开
+    console.log(`[webrtc] ▶ createOffer → ${deviceId.slice(0,8)}`);
     this.disconnect(deviceId);
+    // 清除旧传输残留（防止自动续传导致误弹窗）
+    fileTransferService.clearInterruptedForDevice(deviceId);
 
     // 检查并发限制
     if (this.activeConnectionAttempts >= MAX_CONCURRENT_CONNECTIONS) {
@@ -346,7 +364,10 @@ class WebRTCService {
     sdp: RTCSessionDescriptionInit,
     sendSignaling: SignalingSender,
   ): Promise<void> {
+    console.log(`[webrtc] ◀ handleOffer from ${fromDeviceId.slice(0,8)}`);
     this.disconnect(fromDeviceId);
+    // 新连接到来，清除旧传输残留（防止自动续传导致误弹窗）
+    fileTransferService.clearInterruptedForDevice(fromDeviceId);
 
     // 检查并发限制
     if (this.activeConnectionAttempts >= MAX_CONCURRENT_CONNECTIONS) {
@@ -372,10 +393,15 @@ class WebRTCService {
   ): Promise<void> {
     const peer = this.peers.get(fromDeviceId);
     if (!peer) {
-      console.warn(`Received answer from unknown device: ${fromDeviceId}`);
+      console.warn(`handleAnswer: unknown device ${fromDeviceId.slice(0,8)}`);
       return;
     }
-    await peer.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+    // 防止重复 answer（ICE 重连可能触发多次）
+    if (peer.pc.signalingState !== "have-local-offer") {
+      console.warn(`handleAnswer: ignoring answer in state ${peer.pc.signalingState}`);
+      return;
+    }
+    await peer.pc.setRemoteDescription({ type: sdp.type as RTCSdpType, sdp: sdp.sdp });
   }
 
   /**
@@ -467,6 +493,7 @@ class WebRTCService {
       dc,
       state: "connecting",
       connectionChannel: "lan_p2p",
+      signalingSender: sendSignaling,
     };
     this.peers.set(deviceId, peer);
     this.iceCandidateTypes.delete(deviceId);
@@ -499,6 +526,10 @@ class WebRTCService {
       }
     };
 
+    // ICE 状态详细日志
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC:offer] ${deviceId}: iceConnectionState → ${pc.iceConnectionState}`);
+    };
     // 连接状态变更
     pc.onconnectionstatechange = () => {
       this.handleConnectionStateChange(
@@ -511,8 +542,10 @@ class WebRTCService {
     };
 
     try {
+      console.log(`[webrtc] offer: creating SDP for ${deviceId.slice(0,8)}...`);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.log(`[webrtc] offer: SDP ready, sending to ${deviceId.slice(0,8)}`);
 
       sendSignaling({
         type: "offer",
@@ -558,6 +591,7 @@ class WebRTCService {
       dc: null,
       state: "connecting",
       connectionChannel: "lan_p2p",
+      signalingSender: sendSignaling,
     };
     this.peers.set(fromDeviceId, peer);
     this.iceCandidateTypes.delete(fromDeviceId);
@@ -591,6 +625,9 @@ class WebRTCService {
       }
     };
 
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC:answer] ${fromDeviceId}: iceConnectionState → ${pc.iceConnectionState}`);
+    };
     pc.onconnectionstatechange = () => {
       this.handleConnectionStateChange(
         fromDeviceId,
@@ -602,9 +639,13 @@ class WebRTCService {
     };
 
     try {
-      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      console.log(`[webrtc] answer: setRemoteDescription for ${fromDeviceId.slice(0,8)}...`);
+      // 直接用字典而非 new RTCSessionDescription()（iOS WebKit 兼容性）
+      await pc.setRemoteDescription({ type: sdp.type as RTCSdpType, sdp: sdp.sdp });
+      console.log(`[webrtc] answer: creating answer for ${fromDeviceId.slice(0,8)}...`);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      console.log(`[webrtc] answer: SDP ready, sending to ${fromDeviceId.slice(0,8)}`);
 
       sendSignaling({
         type: "answer",
@@ -612,7 +653,7 @@ class WebRTCService {
         target: fromDeviceId,
       });
     } catch (err) {
-      console.error(`Failed to handle offer from ${fromDeviceId}:`, err);
+      console.error(`[webrtc] answer: FAILED for ${fromDeviceId.slice(0,8)}:`, err);
       this.handleConnectionFailure(
         fromDeviceId,
         false,
@@ -766,7 +807,11 @@ class WebRTCService {
         this.connectionTimeouts.delete(deviceId);
       }
       this.updateState(deviceId, "connected");
-      this.onDataChannelReady?.(deviceId, dc);
+      // 事件总线（新架构）
+      this.emit({ type: "datachannel_open", deviceId, dc });
+      // 向后兼容
+      this._dcHandler?.(deviceId, dc);
+      this._globalHandler?.(deviceId, dc);
       // 通知文件传输引擎检查续传
       fileTransferService.onDataChannelReady(deviceId, dc);
       // 减少活跃连接计数，处理队列
@@ -803,6 +848,7 @@ class WebRTCService {
     sendSignaling: SignalingSender,
     retryCount: number,
   ): void {
+    console.log(`[WebRTC] ${deviceId}: connectionState → ${pc.connectionState}, iceState → ${pc.iceConnectionState}, candidates: ${[...(this.iceCandidateTypes.get(deviceId) || [])].join(',')}`);
     switch (pc.connectionState) {
       case "connected":
         // 连接成功，清除超时
@@ -828,7 +874,7 @@ class WebRTCService {
           isOffer,
           sendSignaling,
           retryCount,
-          "RTCPeerConnection 进入 failed 状态",
+          `RTCPeerConnection failed (iceState: ${pc.iceConnectionState})`,
         );
         break;
 
@@ -850,14 +896,18 @@ class WebRTCService {
     if (peer) {
       peer.state = state;
 
-      // 连接建立后确定实际通道类型
       if (state === "connected") {
         const channel = this.determineChannel(deviceId);
         peer.connectionChannel = channel;
-        this.onChannelChange?.(deviceId, channel);
+        this._chHandler?.(deviceId, channel);
+        this.emit({ type: "channel_change", deviceId, channel });
+        this.startStatsPolling(deviceId);
+      } else if (state === "disconnected" || state === "failed") {
+        this.stopStatsPolling(deviceId);
       }
     }
-    this.onConnectionChange?.(deviceId, state);
+    this._connHandler?.(deviceId, state);
+    this.emit({ type: "connection_change", deviceId, state });
   }
 
   /**
@@ -879,6 +929,77 @@ class WebRTCService {
         this.iceCandidateTypes.set(deviceId, types);
       }
       types.add(match[1]);
+    }
+  }
+
+  // ============================================================
+  // 内部 — Stats 轮询与自适应通道切换
+  // ============================================================
+
+  /**
+   * 定期轮询 WebRTC Stats API，获取 RTT 和带宽
+   */
+  private async pollStats(deviceId: string): Promise<void> {
+    const peer = this.peers.get(deviceId);
+    if (!peer) return;
+    try {
+      const stats = await peer.pc.getStats();
+      let foundRtt = false;
+      stats.forEach((report) => {
+        if (report.type === "candidate-pair" && report.state === "succeeded") {
+          if (report.currentRoundTripTime !== undefined) {
+            peer.rttMs = Math.round(report.currentRoundTripTime * 1000);
+            foundRtt = true;
+          }
+          if (report.availableOutgoingBitrate !== undefined) {
+            peer.availableBitrateBps = report.availableOutgoingBitrate;
+          }
+        }
+      });
+      // 通道自适应：relay 延迟过高时尝试 ICE restart 切换到 P2P
+      if (foundRtt && peer.connectionChannel === "turn_relay") {
+        const types = this.iceCandidateTypes.get(deviceId);
+        const hasHostOrSrflx = types?.has("host") || types?.has("srflx");
+        if (hasHostOrSrflx && peer.rttMs && peer.rttMs > 100) {
+          console.log(`[WebRTC] High RTT via relay (${peer.rttMs}ms), restarting ICE for P2P upgrade`);
+          this.tryIceRestart(deviceId);
+        }
+      }
+    } catch {
+      // getStats() might throw if connection is closing
+    }
+  }
+
+  private startStatsPolling(deviceId: string): void {
+    const peer = this.peers.get(deviceId);
+    if (!peer || peer.statsTimer) return;
+    peer.statsTimer = setInterval(() => this.pollStats(deviceId), 3000);
+  }
+
+  private stopStatsPolling(deviceId: string): void {
+    const peer = this.peers.get(deviceId);
+    if (peer?.statsTimer) {
+      clearInterval(peer.statsTimer);
+      peer.statsTimer = undefined;
+    }
+  }
+
+  /**
+   * ICE restart: 尝试从 relay 切换到 host/srflx 候选
+   */
+  private async tryIceRestart(deviceId: string): Promise<void> {
+    const peer = this.peers.get(deviceId);
+    if (!peer?.signalingSender) return;
+    try {
+      const offer = await peer.pc.createOffer({ iceRestart: true });
+      await peer.pc.setLocalDescription(offer);
+      peer.signalingSender({
+        type: "offer",
+        payload: peer.pc.localDescription,
+        target: deviceId,
+      });
+    } catch (err) {
+      console.warn(`[WebRTC] ICE restart failed for ${deviceId}:`, err);
     }
   }
 

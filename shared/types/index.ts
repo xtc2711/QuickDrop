@@ -121,6 +121,14 @@ export type WsMessageType =
   | "ice_candidate"
   | "peer_join"
   | "peer_leave"
+  // 配对
+  | "create_pairing_code"
+  | "create_pairing_qr"
+  | "join_pairing"
+  | "pairing_code_created"
+  | "pairing_qr_created"
+  | "pairing_success"
+  | "pairing_failed"
   // 系统
   | "ping"
   | "pong"

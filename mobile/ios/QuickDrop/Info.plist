@@ -30,6 +30,13 @@
 		<integer>2</integer> <!-- iPad -->
 	</array>
 
+	<!-- 启动屏幕（让 iOS 17+ 使用全面屏布局，避免上下黑边） -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+	</dict>
+
 	<!-- 状态栏样式 -->
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDefault</string>

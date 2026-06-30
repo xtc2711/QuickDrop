@@ -21,9 +21,21 @@ final class MainViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupViewController()
         setupWebView()
         setupLoadingIndicator()
         loadWebContent()
+    }
+
+    /// 设置视图控制器为全屏模式
+    private func setupViewController() {
+        // 让视图延伸到安全区域外（全屏显示）
+        edgesForExtendedLayout = .all
+        extendedLayoutIncludesOpaqueBars = true
+        additionalSafeAreaInsets = .zero
+        
+        // 背景色匹配 Web 页面 --color-bg，避免底部安全区域露出白色
+        view.backgroundColor = UIColor(red: 0.973, green: 0.980, blue: 0.988, alpha: 1.0) // #f8fafc
     }
 
     // MARK: - Setup
@@ -55,8 +67,8 @@ final class MainViewController: UIViewController {
         webView.scrollView.maximumZoomScale = 1.0
         webView.scrollView.minimumZoomScale = 1.0
 
-        // 安全区域适配
-        webView.scrollView.contentInsetAdjustmentBehavior = .automatic
+        // 延伸到安全区域底部，由 viewport-fit=cover + CSS safe-area-inset 处理
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
 
         view.addSubview(webView)
 
@@ -80,6 +92,10 @@ final class MainViewController: UIViewController {
     private func loadWebContent() {
         loadingIndicator.startAnimating()
 
+        // 注入移动端 viewport 和样式（在页面加载前通过 UserScript）
+        injectMobileViewport()
+        injectPlatformAdapter()
+
         // 注入配置到 JS（在页面加载前）
         jsBridge.injectConfig()
 
@@ -93,6 +109,47 @@ final class MainViewController: UIViewController {
             )
             webView.load(request)
         }
+    }
+
+    /// 注入移动端 viewport meta 标签与样式，解决页面显示过小问题
+    private func injectMobileViewport() {
+        // 读取移动端 CSS
+        var mobileCSS = ""
+        if let cssPath = Bundle.main.path(forResource: "mobile-styles", ofType: "css", inDirectory: "web"),
+           let css = try? String(contentsOfFile: cssPath) {
+            mobileCSS = css.replacingOccurrences(of: "\\", with: "\\\\")
+                             .replacingOccurrences(of: "'", with: "\\'")
+                             .replacingOccurrences(of: "\n", with: "\\n")
+        }
+
+        let js = """
+        (function() {
+            // 移除旧 viewport，设置移动端适配
+            var old = document.querySelector('meta[name="viewport"]');
+            if (old) old.remove();
+            var meta = document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+            document.head.appendChild(meta);
+
+            // 注入移动端 CSS（不添加 body padding，让页面自己处理）
+            var style = document.createElement('style');
+            style.textContent = 'html,body,#root{width:100%;height:100%;margin:0;padding:0;padding-bottom:env(safe-area-inset-bottom);box-sizing:border-box}' + '\(mobileCSS)';
+            document.head.appendChild(style);
+        })();
+        """
+        let script = WKUserScript(source: js, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        webView.configuration.userContentController.addUserScript(script)
+    }
+
+    /// 注入平台适配器，让 Web 页面识别运行环境
+    private func injectPlatformAdapter() {
+        guard let adapterPath = Bundle.main.path(forResource: "platform-adapter", ofType: "js", inDirectory: "web"),
+              let adapterJS = try? String(contentsOfFile: adapterPath) else {
+            return
+        }
+        let script = WKUserScript(source: adapterJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        webView.configuration.userContentController.addUserScript(script)
     }
 }
 

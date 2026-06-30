@@ -84,7 +84,7 @@ export function generatePairingCode(): string {
  * 文件传输常量
  */
 export const CHUNK_SIZE = 16384; // 16KB
-export const MAX_PARALLEL_TRANSFERS = 5;
+export const MAX_PARALLEL_TRANSFERS = 1; // 单个文件顺序传输
 export const MAX_RETRY_COUNT = 3;
 export const PAIRING_CODE_TTL_MS = 2 * 60 * 1000; // 2 分钟
 export const HEARTBEAT_INTERVAL_MS = 15_000; // 15 秒

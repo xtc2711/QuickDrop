@@ -163,18 +163,24 @@ function handleJoinPairing(ws: WebSocket, sender: WsJwtPayload, payload: unknown
     return;
   }
 
-  // 配对成功，通知双方
+  // 获取创建方设备信息
+  const creatorDevice = deviceManager.get(result.creatorDeviceId!);
+
+  // 配对成功，通知加入方（附带创建方设备信息）
   ws.send(
     JSON.stringify({
       type: "pairing_success",
       payload: {
         peer_device_id: result.creatorDeviceId,
+        peer_device_name: creatorDevice?.deviceName || "unknown",
+        peer_device_type: creatorDevice?.deviceType || "desktop",
+        peer_os: creatorDevice?.os || "macos",
       },
       timestamp: new Date().toISOString(),
     }),
   );
 
-  // 通知创建方有新设备加入
+  // 通知创建方有新设备加入（附带加入方设备信息）
   deviceManager.sendToDevice(result.creatorDeviceId!, {
     type: "peer_join",
     payload: {
