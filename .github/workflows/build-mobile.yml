@@ -51,13 +51,48 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 用 v4（使用 node24），packages 用逗号分隔单行字符串
-      # 之前 v3 + block scalar 格式 12 秒内失败，疑似 packages 解析异常
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platforms;android-34,build-tools;34.0.0,platform-tools'
-          accept-android-sdk-licenses: 'true'
+      # 手动安装 Android SDK（android-actions/setup-android 在 CI 中 9 秒内失败）
+      # 1. 下载 cmdline-tools 并解压到标准位置
+      # 2. 用 sdkmanager 安装 platform-tools、build-tools、platforms
+      # 3. 自动接受所有 license
+      - name: Setup Android SDK (manual)
+        run: |
+          set -e
+          # 安装目录（GitHub Actions Ubuntu runner 默认位置）
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/android-sdk}"
+          export ANDROID_SDK_ROOT
+          # 同时写两个变量名，兼容不同工具链
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          # 显式声明给后续 step 用
+          echo "ANDROID_HOME_USED=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+
+          # cmdline-tools 16.0（11076708 是 12.0，14742923 是 20.0；用 16.0 较稳）
+          CMDLINE_TOOLS_VERSION="12266719"
+          cd /tmp
+          echo "Downloading commandline-tools ${CMDLINE_TOOLS_VERSION}..."
+          curl -fSL -o cmdline-tools.zip \
+            "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip"
+          unzip -q cmdline-tools.zip
+          # sdkmanager 期望目录结构：cmdline-tools/latest/bin/sdkmanager
+          rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          mv cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+
+          # 把 cmdline-tools/bin 加入 PATH
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_PATH
+
+          # 静默接受所有 license
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+          # 安装必要组件
+          echo "Installing platform-tools, build-tools;34.0.0, platforms;android-34..."
+          sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 | tail -20
+
+          echo "=== Installed packages ==="
+          sdkmanager --list_installed 2>&1 | head -20
 
       - name: Diagnose environment
         run: |
@@ -92,7 +127,8 @@ jobs:
           exit $GRADLE_EXIT
         env:
           GRADLE_OPTS: -Dorg.gradle.daemon=false
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME_USED }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
