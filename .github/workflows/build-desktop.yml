@@ -85,6 +85,9 @@ jobs:
             echo "===== build-macos.log last 200 lines ====="
             tail -n 200 build-macos.log
           fi
+          # 列出所有 bundle 产物，便于诊断
+          echo "=== Bundle outputs ==="
+          find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle -type f 2>/dev/null || echo "no bundle dir"
           exit $EXIT
 
       - name: Upload macOS artifacts
@@ -151,6 +154,9 @@ jobs:
             # 同时复制日志到 workflow 目录确保上传
             cp build-windows.log ../build-windows.log 2>/dev/null || true
           fi
+          # 列出所有 bundle 产物，便于诊断
+          echo "=== Bundle outputs ==="
+          find desktop/src-tauri/target/release/bundle -type f 2>/dev/null || echo "no bundle dir"
           exit $EXIT
 
       - name: Upload Windows artifacts
@@ -227,6 +233,9 @@ jobs:
             echo "===== build-linux.log last 200 lines ====="
             tail -n 200 build-linux.log
           fi
+          # 列出所有 bundle 产物，便于诊断
+          echo "=== Bundle outputs ==="
+          find desktop/src-tauri/target/release/bundle -type f 2>/dev/null || echo "no bundle dir"
           exit $EXIT
 
       - name: Upload Linux artifacts
@@ -265,6 +274,23 @@ jobs:
           ls -la artifacts/
           find artifacts/ -type f
 
+      - name: Zip macOS .app bundle (for download as zip)
+        run: |
+          if [ -d "artifacts/quickdrop-macos/QuickDrop.app" ]; then
+            cd artifacts/quickdrop-macos
+            zip -r -y QuickDrop-macOS.zip QuickDrop.app
+            cd ../..
+          elif [ -d "artifacts/quickdrop-macos" ]; then
+            cd artifacts/quickdrop-macos
+            for app in *.app; do
+              if [ -d "$app" ]; then
+                zip -r -y "QuickDrop-macOS.zip" "$app"
+              fi
+            done
+            cd ../..
+          fi
+          ls -la artifacts/quickdrop-macos/ 2>/dev/null || true
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -272,9 +298,10 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          fail_on_unmatched_files: false
           files: |
             artifacts/quickdrop-macos/*.dmg
-            artifacts/quickdrop-macos/*.app.zip
+            artifacts/quickdrop-macos/*.zip
             artifacts/quickdrop-windows/*.msi
             artifacts/quickdrop-windows/*.exe
             artifacts/quickdrop-linux/*.deb
