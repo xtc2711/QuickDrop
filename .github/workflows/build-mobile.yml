@@ -190,12 +190,20 @@ jobs:
 
       - name: Generate Xcode project
         working-directory: mobile/ios
-        run: xcodegen generate
+        run: |
+          xcodegen generate
+          echo "=== Generated project structure ==="
+          ls -la QuickDrop.xcodeproj/
+          echo "=== Schemes ==="
+          xcodebuild -project QuickDrop.xcodeproj -list
 
       # 构建 iOS Simulator 用的 .app（无需签名）
       - name: Build for Simulator (unsigned)
         working-directory: mobile/ios
         run: |
+          set -e
+          set -o pipefail
+          echo "=== Build start ==="
           xcodebuild \
             -project QuickDrop.xcodeproj \
             -scheme QuickDrop \
@@ -203,7 +211,34 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            build
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build-ios.log | tail -200
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "=== Build exit code: $BUILD_EXIT ==="
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "===== build-ios.log last 300 lines ====="
+            tail -n 300 build-ios.log
+            exit $BUILD_EXIT
+          fi
+
+      - name: Verify .app bundle
+        working-directory: mobile/ios
+        run: |
+          echo "=== Looking for QuickDrop.app ==="
+          find build -name "QuickDrop.app" -type d 2>/dev/null
+          APP_DIR=$(find build -name "QuickDrop.app" -type d | head -1)
+          if [ -z "$APP_DIR" ]; then
+            echo "ERROR: QuickDrop.app not found!"
+            echo "=== build/ tree ==="
+            find build -maxdepth 4 -type d
+            exit 1
+          fi
+          echo "=== .app contents ==="
+          ls -la "$APP_DIR"
+          echo "=== .app size ==="
+          du -sh "$APP_DIR"
+          du -sh "$APP_DIR"/* 2>/dev/null | head -20
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
@@ -212,7 +247,9 @@ jobs:
           name: quickdrop-ios
           path: |
             mobile/ios/build/Build/Products/Release-iphonesimulator/QuickDrop.app
+            mobile/ios/build-ios.log
           retention-days: 30
+          if-no-files-found: error
 
   # ---------- 创建移动端 Release ----------
   release:
@@ -241,22 +278,26 @@ jobs:
 
       - name: Compress iOS .app
         run: |
+          set -e
           APP_DIR=$(find artifacts/quickdrop-ios -name "QuickDrop.app" -type d | head -1)
           if [ -n "$APP_DIR" ]; then
             echo "Found iOS app at: $APP_DIR"
             cd "$(dirname "$APP_DIR")"
             zip -r QuickDrop-iOS-Simulator.zip "$(basename "$APP_DIR")"
             cd -
+            ls -la artifacts/quickdrop-ios/
           else
             echo "WARNING: QuickDrop.app not found in artifacts/quickdrop-ios"
-            find artifacts/quickdrop-ios -name "*.app" -type d 2>/dev/null
+            find artifacts/quickdrop-ios -name "*.app" -type d 2>/dev/null || true
+            find artifacts/quickdrop-ios -type f 2>/dev/null | head -20 || true
           fi
-          ls -la artifacts/quickdrop-ios/ 2>/dev/null || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}-mobile
+          # 显式指定 tag_name 为 {ref}-mobile，避免与 desktop release 冲突
+          tag_name: ${{ github.ref_name }}-mobile
+          name: QuickDrop ${{ github.ref_name }} Mobile
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
