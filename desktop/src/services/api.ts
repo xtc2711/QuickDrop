@@ -13,7 +13,26 @@ import type {
   ResetPasswordRequest,
 } from "../../../shared/types/index";
 
-const AUTH_BASE = "http://localhost:3001/api/v1";
+// 检测是否在 iOS 模拟器中运行
+function getApiBase(): string {
+  if (typeof window === "undefined") return "http://localhost:3003/api/v1";
+  const hostname = window.location.hostname;
+  // iOS 模拟器加载 Vite 时 host 是 localhost，但 localhost 指向模拟器自己
+  // 需要检测 navigator.platform 来判断是否在 iOS 模拟器中
+  const isIOSSimulator = /iPhone|iPad/.test(navigator.userAgent) && hostname === "localhost";
+  if (isIOSSimulator) {
+    // 模拟器中 localhost:1420 是 Vite 服务，但 localhost:3003 是模拟器自己
+    // 需要通过 Vite 的 host header 推断真实 IP
+    // 这里我们直接用电脑 IP（需要手动配置或环境变量）
+    return "http://localhost:3003/api/v1";
+  }
+  if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+    return `http://${hostname}:3003/api/v1`;
+  }
+  return "http://localhost:3003/api/v1";
+}
+
+const AUTH_BASE = getApiBase();
 
 /**
  * 通用 fetch 封装：自动附加 Bearer Token

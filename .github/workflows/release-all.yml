@@ -1,0 +1,110 @@
+name: Release All Platforms
+
+# ============================================================
+# 完整发布流程：桌面 + 移动端
+# 使用方法：推送 v* 标签（如 v1.0.0）
+# ============================================================
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+# ============================================================
+# 取消同 tag 之前的运行
+# ============================================================
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# ============================================================
+# 任务
+# ============================================================
+jobs:
+  # ---------- 验证版本号 ----------
+  validate:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      clean_version: ${{ steps.get_version.outputs.clean_version }}
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          CLEAN_VERSION="${VERSION#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "clean_version=${CLEAN_VERSION}" >> $GITHUB_OUTPUT
+          echo "Building version: ${VERSION}"
+
+  # ---------- 桌面端构建（触发独立工作流）----------
+  build-desktop:
+    name: Build Desktop
+    needs: validate
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      ref: ${{ github.ref }}
+
+  # ---------- 移动端构建 ----------
+  build-mobile:
+    name: Build Mobile
+    needs: validate
+    uses: ./.github/workflows/build-mobile.yml
+    with:
+      ref: ${{ github.ref }}
+
+  # ---------- 部署官网 ----------
+  deploy-website:
+    name: Deploy Website
+    needs: [build-desktop, build-mobile]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: quickdrop-macos
+          path: website/downloads/
+
+      - name: Download mobile artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: quickdrop-android
+          path: website/downloads/
+
+      # 重命名以匹配网站链接
+      - name: Rename artifacts
+        run: |
+          cd website/downloads
+          # macOS
+          if [ -f "QuickDrop_*.dmg" ]; then
+            mv QuickDrop_*.dmg quickdrop-macos.dmg
+          fi
+          # Android
+          if [ -f "app-debug.apk" ]; then
+            mv app-debug.apk quickdrop-android.apk
+          fi
+          ls -lh
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./website
+          cname: quickdrop.app

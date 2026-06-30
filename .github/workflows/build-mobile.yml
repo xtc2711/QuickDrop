@@ -1,0 +1,164 @@
+name: Build Mobile Apps
+
+# ============================================================
+# 触发条件
+# ============================================================
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '17'
+
+# ============================================================
+# 任务
+# ============================================================
+jobs:
+  # ---------- Android 构建（.apk）----------
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: mobile/android/app/package.json
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        working-directory: mobile/android
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+        env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickdrop-android
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+  # ---------- iOS 构建（.ipa）----------
+  # 注意：iOS 构建需要 Apple 开发者账号配置
+  # 配置方式：在 GitHub 仓库 Settings -> Secrets and variables -> Actions
+  # 添加：APPLE_TEAM_ID, APPLE_CERTIFICATE_P12 (base64), APPLE_CERTIFICATE_PASSWORD, APPLE_PROVISIONING_PROFILE
+  build-ios:
+    name: Build iOS
+    runs-on: macos-latest
+    timeout-minutes: 45
+    # 如果没有配置 Apple 证书，跳过此任务
+    continue-on-error: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: mobile/ios/Package.resolved
+
+      - name: Setup Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      # 手动构建（如果使用 xcodegen 生成）
+      - name: Generate Xcode project
+        working-directory: mobile/ios
+        run: |
+          if command -v xcodegen &> /dev/null; then
+            xcodegen generate
+          else
+            echo "xcodegen not installed, skipping"
+          fi
+
+      # 构建 iOS Simulator 用的 .app（无需签名）
+      - name: Build for Simulator (unsigned)
+        working-directory: mobile/ios
+        run: |
+          xcodebuild \
+            -workspace QuickDrop.xcworkspace \
+            -scheme QuickDrop \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quickdrop-ios
+          path: |
+            mobile/ios/build/Build/Products/Release-iphonesimulator/QuickDrop.app
+          retention-days: 30
+
+  # ---------- 创建移动端 Release ----------
+  release:
+    name: Create Mobile Release
+    needs: [build-android, build-ios]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compress iOS .app
+        run: |
+          if [ -d "artifacts/quickdrop-ios/QuickDrop.app" ]; then
+            cd artifacts/quickdrop-ios
+            zip -r QuickDrop-iOS-Simulator.zip QuickDrop.app
+            cd ../..
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}-mobile
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          files: |
+            artifacts/quickdrop-android/*.apk
+            artifacts/quickdrop-ios/QuickDrop-iOS-Simulator.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

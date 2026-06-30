@@ -7,7 +7,21 @@ import { useAuthStore } from "../stores/authStore";
 import { useDeviceStore } from "../stores/deviceStore";
 import { webrtcService } from "./webrtc";
 
-const SIGNAL_WS = "ws://localhost:3002";
+// 检测是否在 iOS 模拟器中运行
+function getSignalWs(): string {
+  if (typeof window === "undefined") return "ws://localhost:3002";
+  const hostname = window.location.hostname;
+  const isIOSSimulator = /iPhone|iPad/.test(navigator.userAgent) && hostname === "localhost";
+  if (isIOSSimulator) {
+    return "ws://localhost:3002";
+  }
+  if (hostname !== "localhost" && hostname !== "127.0.0.1") {
+    return `ws://${hostname}:3002`;
+  }
+  return "ws://localhost:3002";
+}
+
+const SIGNAL_WS = getSignalWs();
 
 class WebSocketService {
   private ws: WebSocket | null = null;
@@ -15,13 +29,51 @@ class WebSocketService {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
+  private pendingMessages: Array<{ type: string; payload: unknown; target?: string }> = [];
+  private missedPongs = 0;
+  private readonly MAX_MISSED_PONGS = 3;
+  private offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** 配对消息回调（供 PairingDialog 注册） */
+  private onPairingMessage:
+    | ((msg: { type: string; payload: any }) => void)
+    | null = null;
+
+  /** 设备变更回调（配对/上线/下线时触发） */
+  private onDeviceChange: (() => void) | null = null;
+
+  /** 注册配对消息回调 */
+  setPairingCallback(cb: ((msg: { type: string; payload: any }) => void) | null): void {
+    this.onPairingMessage = cb;
+  }
+
+  /** 注册设备变更回调 */
+  setDeviceChangeCallback(cb: (() => void) | null): void {
+    this.onDeviceChange = cb;
+  }
+
+  /** 获取当前设备 ID（诊断用） */
+  getOwnDeviceId(): string {
+    return useAuthStore.getState().currentDevice?.id || "unknown";
+  }
+
+  /** 检查是否已连接 */
+  isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
 
   /**
-   * 建立 WebSocket 连接
+   * 建立 WebSocket 连接（幂等：已连接或连接中则跳过）
    */
   connect(): void {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
+
+    // 已连接或正在连接中则跳过
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      console.log("[WS] Already connected or connecting, skipping");
+      return;
+    }
 
     const url = `${SIGNAL_WS}/?token=${encodeURIComponent(token)}`;
     this.ws = new WebSocket(url);
@@ -31,6 +83,8 @@ class WebSocketService {
       this.reconnectAttempts = 0;
       this.startHeartbeat();
       this.sendDeviceInfo();
+      // 发送积压消息
+      this.flushPending();
     };
 
     this.ws.onmessage = (event) => {
@@ -67,10 +121,18 @@ class WebSocketService {
   }
 
   /**
-   * 发送消息
+   * 发送消息（返回是否发送成功，若未连接则加入待发队列）
    */
-  send(type: string, payload: unknown, target?: string): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+  send(type: string, payload: unknown, target?: string): boolean {
+    // 信令消息记录
+    if (["offer","answer","ice_candidate"].includes(type)) {
+      console.log(`[WS] 📤 send ${type} → ${(target||'?').slice(0,8)}`);
+    }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`[WS] Queuing "${type}": not connected (readyState=${this.ws?.readyState ?? "null"})`);
+      this.pendingMessages.push({ type, payload, target });
+      return false;
+    }
     this.ws.send(
       JSON.stringify({
         type,
@@ -79,6 +141,18 @@ class WebSocketService {
         timestamp: new Date().toISOString(),
       }),
     );
+    return true;
+  }
+
+  /** 发送连接建立前积压的消息 */
+  private flushPending(): void {
+    if (this.pendingMessages.length === 0) return;
+    console.log(`[WS] Flushing ${this.pendingMessages.length} pending messages`);
+    const messages = [...this.pendingMessages];
+    this.pendingMessages = [];
+    for (const msg of messages) {
+      this.send(msg.type, msg.payload, msg.target);
+    }
   }
 
   /**
@@ -89,7 +163,7 @@ class WebSocketService {
 
     switch (message.type) {
       case "pong":
-        // 心跳响应，无需处理
+        this.missedPongs = 0; // 收到服务器响应，重置计数器
         break;
 
       case "device_list_update": {
@@ -101,8 +175,24 @@ class WebSocketService {
             os: string;
           }>;
         };
-        // 更新在线设备列表
         console.log("Online devices:", online_devices);
+        // 取消所有待定离线 + 同步在线设备
+        const now = new Date().toISOString();
+        for (const d of online_devices) {
+          const timer = this.offlineTimers.get(d.device_id);
+          if (timer) { clearTimeout(timer); this.offlineTimers.delete(d.device_id); }
+        }
+        for (const d of online_devices) {
+          deviceStore.addDevice({
+            id: d.device_id,
+            device_name: d.device_name,
+            device_type: d.device_type as "desktop" | "phone" | "tablet",
+            os: d.os as "windows" | "macos" | "android" | "ios",
+            is_online: true,
+            first_seen: now,
+            last_seen: now,
+          });
+        }
         break;
       }
 
@@ -113,6 +203,9 @@ class WebSocketService {
           device_type: string;
           os: string;
         };
+        // 取消待定的离线标记
+        const timer = this.offlineTimers.get(device_id);
+        if (timer) { clearTimeout(timer); this.offlineTimers.delete(device_id); }
         deviceStore.addDevice({
           id: device_id,
           device_name,
@@ -127,7 +220,13 @@ class WebSocketService {
 
       case "device_offline": {
         const { device_id } = message.payload as { device_id: string };
-        deviceStore.setDeviceOnline(device_id, false);
+        // 5 秒缓冲：传输中短暂断连不立即标记离线
+        const existing = this.offlineTimers.get(device_id);
+        if (existing) clearTimeout(existing);
+        this.offlineTimers.set(device_id, setTimeout(() => {
+          deviceStore.setDeviceOnline(device_id, false);
+          this.offlineTimers.delete(device_id);
+        }, 5_000));
         break;
       }
 
@@ -137,31 +236,87 @@ class WebSocketService {
         this.disconnect();
         break;
 
+      // --- 配对消息 ---
+      case "pairing_success": {
+        // 配对成功：将对方设备加入已配对列表（附带真实名称）
+        const p = message.payload as {
+          peer_device_id: string; peer_device_name?: string;
+          peer_device_type?: string; peer_os?: string;
+        };
+        if (p.peer_device_id) {
+          deviceStore.addPairedDevice({
+            id: p.peer_device_id,
+            device_name: p.peer_device_name || "已配对设备",
+            device_type: (p.peer_device_type || "desktop") as "desktop" | "phone" | "tablet",
+            os: (p.peer_os || "macos") as any,
+            is_online: true,
+            first_seen: new Date().toISOString(),
+            last_seen: new Date().toISOString(),
+          });
+        }
+        if (this.onDeviceChange) this.onDeviceChange();
+        if (this.onPairingMessage) {
+          this.onPairingMessage({ type: message.type, payload: message.payload });
+        }
+        break;
+      }
+
+      case "pairing_code_created":
+      case "pairing_qr_created":
+      case "pairing_failed":
+        if (this.onPairingMessage) {
+          this.onPairingMessage({ type: message.type, payload: message.payload });
+        }
+        break;
+
+      case "peer_join": {
+        // 对方通过配对加入，添加到已配对列表
+        const pj = message.payload as {
+          device_id: string; device_name: string;
+          device_type: string; os: string; room_id: string;
+        };
+        console.log("New peer joined:", pj);
+        deviceStore.addPairedDevice({
+          id: pj.device_id,
+          device_name: pj.device_name,
+          device_type: pj.device_type as "desktop" | "phone" | "tablet",
+          os: pj.os as "windows" | "macos" | "android" | "ios",
+          is_online: true,
+          first_seen: new Date().toISOString(),
+          last_seen: new Date().toISOString(),
+        });
+        if (this.onDeviceChange) this.onDeviceChange();
+        break;
+      }
+
       // --- WebRTC 信令透传 ---
 
       case "offer": {
-        const { from_device_id, sdp } = message.payload as {
-          from_device_id: string;
-          sdp: RTCSessionDescriptionInit;
-        };
+        const from_device_id = (message as any).from_device_id || "";
+        const sdp = message.payload as RTCSessionDescriptionInit;
+        console.log(`[WS] 📥 offer from ${from_device_id.slice(0,8)}, sdp=${sdp?.type}`);
+
         webrtcService.handleOffer(from_device_id, sdp, (msg) =>
           this.send(msg.type, msg.payload, msg.target),
-        );
+        ).catch((err) => {
+          this.send("error", { message: `handleOffer failed: ${err?.message || String(err)}`, target: from_device_id });
+        });
         break;
       }
 
       case "answer": {
-        const { from_device_id, sdp } = message.payload as {
-          from_device_id: string;
-          sdp: RTCSessionDescriptionInit;
-        };
-        webrtcService.handleAnswer(from_device_id, sdp);
+        const from_device_id = (message as any).from_device_id || "";
+        const sdp = message.payload as RTCSessionDescriptionInit;
+        console.log(`[WS] 📥 answer from ${from_device_id.slice(0,8)}, sdp=${sdp?.type}`);
+        webrtcService.handleAnswer(from_device_id, sdp).catch((err) => {
+          console.warn(`[WS] handleAnswer error (ignored): ${err?.message}`);
+        });
         break;
       }
 
       case "ice_candidate": {
-        const { from_device_id, ...candidateInit } = message.payload as {
-          from_device_id: string;
+        const from_device_id = (message as any).from_device_id || "";
+        const { ...candidateInit } = message.payload as {
           candidate: string;
           sdpMid: string | null;
           sdpMLineIndex: number | null;
@@ -170,9 +325,20 @@ class WebSocketService {
         break;
       }
 
+      case "debug_report": {
+        const r = message.payload as { step: string; by: string; rtcp_available?: boolean; error?: string };
+        console.log(`🐛 [DEBUG from ${r.by?.slice(0,8) || '?'}] ${r.step} ${r.rtcp_available !== undefined ? 'RTCP='+r.rtcp_available : ''} ${r.error || ''}`);
+        break;
+      }
+
+      case "error": {
+        const errMsg = (message.payload as { message?: string })?.message || "未知错误";
+        console.error("❌ Server error:", errMsg, message.payload);
+        break;
+      }
+
       default:
-        // 其他消息（信令等）由对应的 handler 处理
-        console.debug("Unhandled WS message:", message.type);
+        console.debug("Unhandled WS message:", message.type, message.payload);
     }
   }
 
@@ -195,7 +361,15 @@ class WebSocketService {
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
+    this.missedPongs = 0;
     this.heartbeatTimer = setInterval(() => {
+      this.missedPongs++;
+      if (this.missedPongs >= this.MAX_MISSED_PONGS) {
+        console.warn(`[WS] ${this.missedPongs} consecutive pongs missed, reconnecting`);
+        this.missedPongs = 0;
+        this.ws?.close(4000, "heartbeat timeout");
+        return;
+      }
       this.send("ping", {});
     }, 15_000);
   }
