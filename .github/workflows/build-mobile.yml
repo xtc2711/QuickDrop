@@ -233,13 +233,25 @@ jobs:
         with:
           path: artifacts
 
+      - name: Display artifacts structure
+        run: |
+          echo "=== Artifacts ==="
+          ls -la artifacts/
+          find artifacts/ -type f
+
       - name: Compress iOS .app
         run: |
-          if [ -d "artifacts/quickdrop-ios/QuickDrop.app" ]; then
-            cd artifacts/quickdrop-ios
-            zip -r QuickDrop-iOS-Simulator.zip QuickDrop.app
-            cd ../..
+          APP_DIR=$(find artifacts/quickdrop-ios -name "QuickDrop.app" -type d | head -1)
+          if [ -n "$APP_DIR" ]; then
+            echo "Found iOS app at: $APP_DIR"
+            cd "$(dirname "$APP_DIR")"
+            zip -r QuickDrop-iOS-Simulator.zip "$(basename "$APP_DIR")"
+            cd -
+          else
+            echo "WARNING: QuickDrop.app not found in artifacts/quickdrop-ios"
+            find artifacts/quickdrop-ios -name "*.app" -type d 2>/dev/null
           fi
+          ls -la artifacts/quickdrop-ios/ 2>/dev/null || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -248,8 +260,9 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          fail_on_unmatched_files: false
           files: |
-            artifacts/quickdrop-android/*.apk
-            artifacts/quickdrop-ios/QuickDrop-iOS-Simulator.zip
+            artifacts/quickdrop-android/**/*.apk
+            artifacts/quickdrop-ios/**/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
