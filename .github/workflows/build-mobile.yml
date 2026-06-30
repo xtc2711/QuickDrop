@@ -44,8 +44,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: mobile/android/app/package.json
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -93,8 +91,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: mobile/ios/Package.resolved
 
       - name: Setup Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
@@ -102,22 +98,21 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      # 手动构建（如果使用 xcodegen 生成）
+      # 安装 xcodegen 并从 project.yml 生成 QuickDrop.xcodeproj
+      # 这样仓库中无需提交 .xcodeproj（已被 .gitignore 排除）
+      - name: Install xcodegen
+        run: brew install xcodegen
+
       - name: Generate Xcode project
         working-directory: mobile/ios
-        run: |
-          if command -v xcodegen &> /dev/null; then
-            xcodegen generate
-          else
-            echo "xcodegen not installed, skipping"
-          fi
+        run: xcodegen generate
 
       # 构建 iOS Simulator 用的 .app（无需签名）
       - name: Build for Simulator (unsigned)
         working-directory: mobile/ios
         run: |
           xcodebuild \
-            -workspace QuickDrop.xcworkspace \
+            -project QuickDrop.xcodeproj \
             -scheme QuickDrop \
             -configuration Release \
             -destination 'generic/platform=iOS Simulator' \
