@@ -70,6 +70,10 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      - name: Force time 0.3.51 (fix cookie 0.18.1 incompatibility)
+        working-directory: desktop/src-tauri
+        run: cargo update -p time --precise 0.3.51 || true
+
       - name: Build Tauri app (arm64)
         working-directory: desktop
         run: |
@@ -128,6 +132,10 @@ jobs:
       - name: Install dependencies
         working-directory: desktop
         run: npm ci
+
+      - name: Force time 0.3.51 (fix cookie 0.18.1 incompatibility)
+        working-directory: desktop/src-tauri
+        run: cargo update -p time --precise 0.3.51 || true
 
       - name: Build Tauri app
         working-directory: desktop
@@ -199,6 +207,10 @@ jobs:
       - name: Install dependencies
         working-directory: desktop
         run: npm ci
+
+      - name: Force time 0.3.51 (fix cookie 0.18.1 incompatibility)
+        working-directory: desktop/src-tauri
+        run: cargo update -p time --precise 0.3.51 || true
 
       - name: Build Tauri app
         working-directory: desktop

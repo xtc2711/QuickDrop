@@ -17,5 +17,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 锁定 time 到 0.3.41 以解决 cookie 0.18.1 与 time 0.3.52+ 的 API 不兼容问题
-# (cookie 调用 time::format::parse() 时只传 1 个参数，但 time 0.3.52 把签名改成需要 2 个参数)
+
+# ---------------------------------------------------------------
+# 修复 cookie 0.18.1 与 time 0.3.52 的 API 不兼容问题
+# 错误: cookie 0.18.1 (parse.rs:226) 调用 time::format::parse() 只传 1 个参数
+#       但 time 0.3.52 把签名改成需要 2 个参数 (input: &[u8], defaults: Option<Parsed>)
+# 解决: 把 time 锁到 0.3.51（plist 1.9.0 要求 ^0.3.47，0.3.51 满足）
+# 备用方案: 在 CI 中可执行 `cargo update -p time --precise 0.3.51` 强制降级
+# ---------------------------------------------------------------
