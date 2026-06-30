@@ -54,9 +54,12 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          android-sdk-version: '34'
-          build-tools-version: '34.0.0'
-          platforms: 'android-34'
+          # v3 API：必须用 packages 而不是 android-sdk-version/build-tools-version/platforms
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            cmdline-tools;latest
+            platform-tools
 
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
@@ -66,6 +69,8 @@ jobs:
         with:
           # AGP 8.2.2 + Kotlin 1.9.22 兼容 Gradle 8.2 ~ 8.5
           gradle-version: '8.5'
+          # 禁用 Gradle home cache（避免 Cache service 400 错误）
+          cache-disabled: true
 
       - name: Build Debug APK (gradle 直接调用，无需 gradlew)
         working-directory: mobile/android
