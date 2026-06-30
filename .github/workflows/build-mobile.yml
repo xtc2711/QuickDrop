@@ -2,6 +2,10 @@ name: Build Mobile Apps
 
 # ============================================================
 # 触发条件
+# - push tags: 自动发布
+# - pull_request: PR 验证
+# - workflow_dispatch: 手动触发
+# - workflow_call: 被 release-all.yml 复用
 # ============================================================
 on:
   push:
@@ -10,6 +14,13 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main, develop]
+  workflow_call:
+    inputs:
+      ref:
+        description: '要构建的 git 引用（tag/branch/sha）'
+        required: false
+        type: string
+        default: ''
 
 env:
   NODE_VERSION: '22'
