@@ -225,20 +225,45 @@ jobs:
       - name: Verify .app bundle
         working-directory: mobile/ios
         run: |
+          set -e
           echo "=== Looking for QuickDrop.app ==="
           find build -name "QuickDrop.app" -type d 2>/dev/null
           APP_DIR=$(find build -name "QuickDrop.app" -type d | head -1)
           if [ -z "$APP_DIR" ]; then
-            echo "ERROR: QuickDrop.app not found!"
+            echo "::error::QuickDrop.app not found!"
             echo "=== build/ tree ==="
-            find build -maxdepth 4 -type d
+            find build -maxdepth 4 -type d 2>/dev/null
             exit 1
           fi
+
+          # 计算 .app 大小（KB）
+          APP_SIZE_KB=$(du -sk "$APP_DIR" | awk '{print $1}')
+          APP_SIZE_MB=$((APP_SIZE_KB / 1024))
+          echo "::notice title=iOS app size::${APP_SIZE_MB} MB (${APP_SIZE_KB} KB)"
+
           echo "=== .app contents ==="
           ls -la "$APP_DIR"
           echo "=== .app size ==="
           du -sh "$APP_DIR"
           du -sh "$APP_DIR"/* 2>/dev/null | head -20
+
+          # 验证：可执行文件存在
+          if [ ! -f "$APP_DIR/QuickDrop" ]; then
+            echo "::error::QuickDrop executable not found in .app bundle"
+            exit 1
+          fi
+          EXE_SIZE=$(du -sh "$APP_DIR/QuickDrop" | awk '{print $1}')
+          echo "::notice title=iOS executable::${EXE_SIZE}"
+
+          # 验证：.app 至少 200KB (Swift + WKWebView 包装 app 通常 ~500KB)
+          if [ "$APP_SIZE_KB" -lt 200 ]; then
+            echo "::error::QuickDrop.app is too small (${APP_SIZE_KB} KB < 200KB) - build likely failed silently"
+            echo "=== Recursive .app contents ==="
+            find "$APP_DIR" -type f 2>/dev/null | head -50
+            exit 1
+          fi
+
+          echo "=== Verification passed ==="
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
