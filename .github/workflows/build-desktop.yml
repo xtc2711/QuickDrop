@@ -276,20 +276,18 @@ jobs:
 
       - name: Zip macOS .app bundle (for download as zip)
         run: |
-          if [ -d "artifacts/quickdrop-macos/QuickDrop.app" ]; then
-            cd artifacts/quickdrop-macos
-            zip -r -y QuickDrop-macOS.zip QuickDrop.app
-            cd ../..
-          elif [ -d "artifacts/quickdrop-macos" ]; then
-            cd artifacts/quickdrop-macos
-            for app in *.app; do
-              if [ -d "$app" ]; then
-                zip -r -y "QuickDrop-macOS.zip" "$app"
-              fi
-            done
-            cd ../..
+          # 在任意子目录下查找 QuickDrop.app
+          APP_DIR=$(find artifacts/quickdrop-macos -name "QuickDrop.app" -type d | head -1)
+          if [ -n "$APP_DIR" ]; then
+            echo "Found app at: $APP_DIR"
+            cd "$(dirname "$APP_DIR")"
+            zip -r -y QuickDrop-macOS.zip "$(basename "$APP_DIR")"
+            cd -
+            ls -la "$(dirname "$APP_DIR")" 2>/dev/null || true
+          else
+            echo "WARNING: QuickDrop.app not found in artifacts/quickdrop-macos"
+            find artifacts/quickdrop-macos -name "*.app" -type d 2>/dev/null
           fi
-          ls -la artifacts/quickdrop-macos/ 2>/dev/null || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -300,11 +298,11 @@ jobs:
           prerelease: ${{ contains(github.ref, 'rc') || contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
           fail_on_unmatched_files: false
           files: |
-            artifacts/quickdrop-macos/*.dmg
-            artifacts/quickdrop-macos/*.zip
-            artifacts/quickdrop-windows/*.msi
-            artifacts/quickdrop-windows/*.exe
-            artifacts/quickdrop-linux/*.deb
-            artifacts/quickdrop-linux/*.AppImage
+            artifacts/quickdrop-macos/**/*.dmg
+            artifacts/quickdrop-macos/**/*.zip
+            artifacts/quickdrop-windows/**/*.msi
+            artifacts/quickdrop-windows/**/*.exe
+            artifacts/quickdrop-linux/**/*.deb
+            artifacts/quickdrop-linux/**/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
