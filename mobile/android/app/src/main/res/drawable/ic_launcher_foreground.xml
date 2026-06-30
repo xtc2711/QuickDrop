@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 闪电图标：QuickDrop 强调"快速传输"语义 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,30 L40,60 L52,60 L48,82 L72,50 L60,50 Z" />
+    <!-- 中心圆点：象征中心枢纽 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,46 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>
