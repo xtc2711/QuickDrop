@@ -15,6 +15,15 @@ on:
         required: true
         default: 'v1.0.0'
 
+# 授予子 workflow（build-desktop/build-mobile）所需的写权限，
+# 否则 workflow_call 默认只授予 contents: read，子 workflow 的
+# release job 中 `permissions: contents: write` 会启动失败。
+permissions:
+  contents: write
+  actions: read
+  pages: write
+  id-token: write
+
 # ============================================================
 # 取消同 tag 之前的运行
 # ============================================================
