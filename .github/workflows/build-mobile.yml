@@ -125,16 +125,10 @@ jobs:
         working-directory: mobile/android
         run: |
           set +e
-          gradle assembleDebug --no-daemon --stacktrace > build.log 2>&1
-          GRADLE_EXIT=$?
+          # 实时输出到 stdout（保留 build.log 文件）
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          GRADLE_EXIT=${PIPESTATUS[0]}
           echo "Gradle exit code: $GRADLE_EXIT"
-          if [ $GRADLE_EXIT -ne 0 ]; then
-            echo "===== build.log (last 200 lines) ====="
-            tail -n 200 build.log
-          else
-            echo "===== build.log (last 50 lines) ====="
-            tail -n 50 build.log
-          fi
           exit $GRADLE_EXIT
         env:
           GRADLE_OPTS: -Dorg.gradle.daemon=false
