@@ -125,10 +125,24 @@ jobs:
         working-directory: mobile/android
         run: |
           set +e
-          # 实时输出到 stdout（保留 build.log 文件）
+          # 输出环境信息
+          echo "=== Environment ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          gradle --version | head -5
+          which sdkmanager
+          echo "=== sdkmanager installed packages ==="
+          sdkmanager --list_installed 2>&1 | head -30 || true
+          echo "=== Build start ==="
           gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
           GRADLE_EXIT=${PIPESTATUS[0]}
           echo "Gradle exit code: $GRADLE_EXIT"
+          if [ $GRADLE_EXIT -ne 0 ]; then
+            echo "===== build.log last 100 lines ====="
+            tail -n 100 build.log
+          fi
           exit $GRADLE_EXIT
         env:
           GRADLE_OPTS: -Dorg.gradle.daemon=false
