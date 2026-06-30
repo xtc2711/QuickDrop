@@ -37,7 +37,9 @@ services/auth/prisma/*.db
 services/auth/prisma/*.db-journal
 
 # Ralph — 内部 agent 状态目录（不应提交）
+# 整个 .ralph/ 目录是 agent 运行时产物，无需版本管理
 .ralph/
+.ralphrc
 
 # Xcode 自动生成（应用 project.yml + xcodegen 生成）
 *.xcodeproj/
@@ -49,3 +51,26 @@ xcuserdata/
 
 # Cargo 锁文件（CI 环境生成，本地不提交）
 desktop/src-tauri/Cargo.lock
+
+# ============================================================
+# 个人/临时文件
+# ============================================================
+# 云端服务器连接笔记（含敏感信息）
+yun.md
+
+# 网站下载目录中的安装包示例文件（实际从 GitHub Release 下载）
+website/downloads/*.dmg
+website/downloads/*.msi
+website/downloads/*.exe
+website/downloads/*.deb
+website/downloads/*.AppImage
+website/downloads/*.apk
+website/downloads/*.ipa
+website/downloads/*.zip
+
+# Claude / Trae agent 会话与计划文件
+.claude/
+.trae/
+AGENTS.md
+CLAUDE.md
+*.agent.md
